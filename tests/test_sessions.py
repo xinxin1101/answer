@@ -209,8 +209,9 @@ def test_file_database_uses_wal_and_foreign_keys(tmp_path) -> None:
     SessionStore(database_path)
     connection = sqlite3.connect(database_path)
     journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
-    foreign_keys = connection.execute("PRAGMA foreign_keys").fetchone()[0]
     connection.close()
+    with store._connection() as connection:
+        foreign_keys = connection.execute("PRAGMA foreign_keys").fetchone()[0]
 
     assert journal_mode.lower() == "wal"
-    assert foreign_keys == 0  # Foreign keys are enabled per application connection.
+    assert foreign_keys == 1
