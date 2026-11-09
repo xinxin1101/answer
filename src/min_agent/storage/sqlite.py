@@ -1,7 +1,7 @@
 """Shared SQLite connection settings for safe local concurrent access."""
 
-import sqlite3
 from pathlib import Path
+import sqlite3
 
 
 SQLITE_TIMEOUT_SECONDS = 10.0
