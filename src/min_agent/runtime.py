@@ -1,7 +1,7 @@
 """The explicit Agent Loop coordinating the LLM and registered tools."""
 
-import json
 from collections.abc import Sequence
+import json
 from typing import Literal
 
 from pydantic import BaseModel, Field
