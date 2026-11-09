@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from min_agent.chat.service import ChatService
+from min_agent.config import Settings
 from min_agent.context.manager import ContextManager
 from min_agent.core.schemas import ChatMessage, LLMResponse, ToolCall
 from min_agent.llm.errors import LLMProviderError
@@ -15,7 +16,6 @@ from min_agent.runtime import AgentRuntime
 from min_agent.sessions.store import SessionStore
 from min_agent.tools.defaults import build_default_registry
 from min_agent.tools.todo import TodoStore
-from min_agent.config import Settings
 from min_agent.trace.recorder import TraceRecorder
 
 
