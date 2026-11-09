@@ -1,5 +1,8 @@
 """Connect SessionStore, ContextManager, MemoryService, Trace and AgentRuntime."""
 
+import hashlib
+import json
+
 from pydantic import BaseModel
 
 from min_agent.context.manager import ContextManager
@@ -26,7 +29,7 @@ class ChatResult(BaseModel):
 
 
 class ChatService:
-    """Run chat turns and optionally manage memory and execution traces."""
+    """Run serialized chat turns with optional memory and durable idempotency."""
 
     def __init__(
         self,
@@ -47,21 +50,65 @@ class ChatService:
         user_id: str,
         message: str,
         session_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ChatResult:
         if not message.strip():
             raise ValueError("message must not be blank")
 
-        if session_id is None:
-            session = self.session_store.create_session(
-                user_id,
-                message.strip()[:60],
+        request_key = idempotency_key.strip() if idempotency_key else None
+        if request_key:
+            canonical_request = json.dumps(
+                {"message": message, "session_id": session_id},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
             )
-            session_id = session.session_id
-            history: list[ChatMessage] = []
-        else:
-            self.session_store.get_session(user_id, session_id)
-            history = self.session_store.get_messages(user_id, session_id)
+            request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+            cached = self.session_store.claim_idempotency_request(
+                user_id,
+                request_key,
+                request_hash,
+            )
+            if cached is not None:
+                return ChatResult.model_validate(cached)
 
+        created_session = False
+        try:
+            if session_id is None:
+                session = self.session_store.create_session(
+                    user_id,
+                    message.strip()[:60],
+                )
+                session_id = session.session_id
+                created_session = True
+
+            async with self.session_store.session_lock(user_id, session_id):
+                result = await self._run_turn(user_id, message, session_id)
+
+            if request_key:
+                self.session_store.complete_idempotency_request(
+                    user_id,
+                    request_key,
+                    result.model_dump(),
+                )
+            return result
+        except Exception:
+            if created_session and session_id is not None:
+                try:
+                    self.session_store.delete_session(user_id, session_id)
+                except Exception:
+                    pass
+            if request_key:
+                self.session_store.release_idempotency_request(user_id, request_key)
+            raise
+
+    async def _run_turn(
+        self,
+        user_id: str,
+        message: str,
+        session_id: str,
+    ) -> ChatResult:
+        history: list[ChatMessage] = self.session_store.get_messages(user_id, session_id)
         trace_id = (
             self.trace_recorder.start_trace(user_id, session_id)
             if self.trace_recorder is not None
@@ -82,6 +129,7 @@ class ChatService:
                 context_summary="\n\n".join(context_parts) or None,
                 trace_id=trace_id,
                 session_id=session_id,
+                user_id=user_id,
             )
 
             # Persist only this turn; original Session history remains untouched.
