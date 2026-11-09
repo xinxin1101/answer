@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from min_agent.storage.sqlite import connect_sqlite, enable_wal, prepare_database_path
 from min_agent.tools.base import ToolDefinition, ToolExecutionContext
 
-
 _LEGACY_OWNER = "__legacy_unassigned__"
 
 
