@@ -22,13 +22,34 @@
 - **目标**：在指定 GitHub 仓库中建立从零实现 Agent Runtime 的 Python 项目基础结构。
 - **输入 Prompt 摘要**：不依赖 LangGraph、OpenHands、OpenClaw 等 Agent 框架；后续需要实现 Agent Loop、工具注册、Session 隔离、Context 管理、Memory、异常处理、Trace 和测试。
 - **修改文件**：README、pyproject、环境变量模板、gitignore、FastAPI 入口、配置模块、基础领域 Schema、LLM Provider Protocol、测试、架构文档、GitHub Actions。
-- **设计决策**：
-  1. 使用 Python 3.11+、FastAPI、Pydantic Settings 和 Pytest。
-  2. 先定义 LLM Provider Protocol，使 Runtime 不绑定某个 SDK；实际 HTTP 适配器留到阶段 2。
-  3. 先建立 Agent 请求、消息、工具调用和 LLM 响应的领域 Schema。
-  4. API Key 只允许从本地环境变量读取；仓库只提交无真实凭据的 .env.example。
-  5. 第一阶段只交付基础服务和工程骨架，不虚报 Agent Loop 已完成。
-- **遇到的问题**：目标仓库最初为空，没有可读取的 README 或已有目录。首次 CI 运行时，Ruff I001 检查发现两个文件在模块级变量前多留了一行空行。
-- **定位与解决**：先初始化 README 和 main 分支，再基于首个提交创建其余项目文件；根据 GitHub Actions 日志定位多余空行并修复，同时移除临时诊断步骤。
-- **验证命令及结果**：GitHub Actions 最新运行通过依赖安装、ruff check src tests 和 pytest；本次未在本地执行测试。运行记录：https://github.com/xinxin1101/answer/actions/runs/42584726796
+- **设计决策**：使用 Python 3.11+、FastAPI、Pydantic Settings 和 Pytest；先定义 LLM Provider Protocol，使 Runtime 不绑定某个 SDK；API Key 只从环境变量读取。
+- **遇到的问题**：目标仓库最初为空；首次 CI 运行时 Ruff I001 检查发现两个文件的导入格式问题。
+- **定位与解决**：根据 GitHub Actions 日志修复导入格式，并重新执行 CI。
+- **验证命令及结果**：GitHub Actions 通过依赖安装、Ruff 和 Pytest。运行记录：https://github.com/xinxin1101/answer/actions/runs/42584901354
 - **遗留事项**：实现 LLM HTTP 适配器、响应解析与 Fake Provider 测试。
+
+## 2026-11-09 / 阶段 2：LLM Provider 与输出解析
+
+- **目标**：不使用 Agent 框架或 LLM SDK，自行封装 OpenAI-compatible Chat Completions HTTP 请求和响应解析。
+- **输入 Prompt 摘要**：实现 LLM Client，支持普通文本和工具调用响应解析；API Key 不得写入代码。
+- **修改文件**：llm/errors.py、llm/parser.py、llm/openai_compatible.py、test_llm_parser.py、test_llm_provider.py、docs/llm-integration.md。
+- **设计决策**：使用 httpx.AsyncClient；通过 Pydantic LLMResponse / ToolCall 归一化响应；使用 httpx.MockTransport 测试，不调用真实模型。
+- **安全边界**：Provider 只解析 ToolCall，不执行工具；错误消息不回显服务端错误正文；密钥仅通过环境变量注入。
+- **验证命令及结果**：阶段 2 提交曾通过 GitHub Actions，运行记录：https://github.com/xinxin1101/answer/actions/runs/42588957663
+- **遗留事项**：与 Tool Registry 和 Agent Loop 集成。
+
+## 2026-11-09 / 阶段 3：Tool Registry 与内置工具
+
+- **目标**：实现自有工具注册、JSON Schema 暴露、参数校验、受控执行和三个必需工具。
+- **输入 Prompt 摘要**：实现 calculator、mock search 和 todo；模型按 Schema 自主选择工具；执行前必须校验参数。
+- **修改文件**：tools/base.py、tools/registry.py、tools/calculator.py、tools/search.py、tools/todo.py、tools/defaults.py、test_tool_registry.py、test_builtin_tools.py、docs/tools.md，并恢复阶段 2 的 LLM Provider、解析器和测试文件。
+- **设计决策**：
+  1. ToolDefinition 用 Pydantic 参数模型生成 JSON Schema。
+  2. ToolRegistry 负责名称查找、参数校验、超时和结构化错误结果。
+  3. Calculator 使用 AST 白名单，不使用 eval。
+  4. Search 使用离线 Mock 数据，便于可重复测试。
+  5. Todo 使用 SQLite 参数化查询，支持 add / list / complete。
+- **遇到的问题**：首次 CI 因 Ruff I001 和 E501 未通过；修复后发现一次 Git Tree 更新没有保留上一阶段的 LLM 文件。
+- **定位与解决**：根据 Actions 日志修复导入排序和超长行；通过递归检查 Git Tree 发现 LLM 文件缺失，再从阶段 2 的提交恢复，并将阶段 2 和阶段 3 文件放入同一完整仓库树。
+- **验证命令及结果**：代码修复后 Ruff 通过；首次测试收集为 22 项通过，但该次提交未包含阶段 2 的测试文件，因此不能作为完整集成验收。恢复文件后的完整 CI 结果待本次提交完成后更新。
+- **遗留事项**：实现 Agent Loop，将 LLMProvider、ToolRegistry 和 ChatMessage/ToolCall 连接起来。

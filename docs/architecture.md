@@ -4,7 +4,7 @@
 
 本项目从零实现一个最小可用 Agent Runtime。FastAPI 只承担 HTTP 接入，不承担 Agent 决策；Agent Loop、工具注册、上下文管理、Session 和 Memory 均由项目自身实现。
 
-明确不使用 LangGraph、OpenHands、OpenClaw 等 Agent 框架。LLM SDK 也不负责执行工具：模型只返回结构化调用请求，Runtime 负责验证、授权和执行。
+明确不使用 LangGraph、OpenHands、OpenClaw 等 Agent 框架。LLM Provider 只负责模型 HTTP 请求和响应归一化；模型只提出结构化工具调用请求，Runtime 负责校验、授权和执行。
 
 ## 2. 目标架构
 
@@ -28,11 +28,11 @@ AgentRuntime ---------------------- TraceRecorder
   |
   +---- ToolRegistry
           |
-          +---- JSON Schema validation
+          +---- Pydantic / JSON Schema validation
           +---- ToolExecutor
                   +---- calculator
-                  +---- search (mockable)
-                  +---- todo
+                  +---- search (mock)
+                  +---- todo (SQLite)
 ~~~
 
 ### 模块职责
@@ -59,10 +59,8 @@ for step in range(max_agent_steps):
 
     if response.tool_calls:
         for call in response.tool_calls:
-            tool = registry.get(call.name)
-            validated_args = tool.validate(call.arguments)
-            result = await tool.execute(validated_args)
-            messages.append(tool_result_message(call, result))
+            result = await registry.execute(call.name, call.arguments)
+            append_tool_result(messages, call.id, result)
         continue
 
     return response.content or ""
@@ -70,7 +68,7 @@ for step in range(max_agent_steps):
 return "本轮执行达到最大步骤限制，请缩小任务范围后重试。"
 ~~~
 
-上面是流程示意，不是当前已经完成的实现。实际实现还需要处理并行/串行工具调用策略、工具错误回填、重复调用保护、超时和取消。
+上面是流程示意，不是当前已经完成的实现。下一阶段将实现 AgentRuntime，并补充 assistant tool-call 消息和 tool result 消息的上下文表示。
 
 ## 4. Context 如何构建
 
@@ -95,7 +93,7 @@ return "本轮执行达到最大步骤限制，请缩小任务范围后重试。
 - 将更早的完整轮次压缩成摘要，摘要保留目标、关键事实、用户约束、已完成步骤和待办事项。
 - 完整原始历史仍保存在 SessionStore；压缩只影响发送给 LLM 的 Context。
 
-后续可以从最大消息数升级为 token 预算，但不在第一阶段引入复杂摘要模型。
+后续可以从最大消息数升级为 token 预算，但不在初期引入复杂摘要模型。
 
 ## 5. Session 与 Memory 的边界
 
@@ -130,17 +128,25 @@ Session 表示一个独立聊天窗口。同一用户可以有多个 session：
 
 ## 6. 工具调用与安全
 
-每个工具至少包含：
+### Tool Registry 已实现的机制
 
-- name：稳定且唯一的工具名。
-- description：模型可理解的用途和适用边界。
-- parameters_schema：JSON Schema 参数定义。
-- handler：真实执行函数。
-- timeout / permission：执行超时和权限约束。
+- 工具通过 ToolDefinition 注册，包含唯一名称、描述、Pydantic 参数模型、handler 和超时。
+- ToolRegistry 根据 Pydantic 模型自动生成 JSON Schema，并转换为 OpenAI-compatible function tools 格式。
+- 执行前调用 model_validate；额外字段默认拒绝，类型和字段约束不通过时不调用 handler。
+- 未注册工具、参数错误、超时和 handler 异常均返回统一的 ToolExecutionResult。
+- LLM Provider 只发送工具 Schema、解析 ToolCall，不会直接执行任何工具。
 
-模型返回的参数必须先经过 JSON 解析、Schema 校验和权限检查，再进入 handler。禁止使用 eval 执行模型生成的 Python 表达式。Calculator 应使用安全的 AST 白名单解析；Search 第一版允许 Mock；Todo 的写操作应验证参数并持久化。
+### 三个内置工具
 
-工具执行结果应有大小限制，避免大段文档或搜索结果挤占上下文。
+| 工具 | 行为 | 安全边界 |
+| --- | --- | --- |
+| calculator | AST 白名单计算 +、-、*、/、//、%、** 和括号 | 不允许函数调用、变量、属性访问；限制表达式长度、节点数和指数 |
+| search | 在内置小型知识集合中做确定性 Mock 检索 | 不访问外网，结果明确标记 mock=true |
+| todo | SQLite add / list / complete | 参数按 action 校验，SQL 使用参数化查询 |
+
+模型返回的参数始终是不可信输入。JSON 解析成功不代表参数可信，仍必须经过工具 Schema 校验和后续权限检查。禁止使用 eval 执行模型生成的表达式。
+
+工具执行结果应有大小限制，避免大段文档或搜索结果挤占上下文。当前 Registry 已有超时和统一错误结构；权限策略、调用去重和完整 Trace 将在后续阶段接入。
 
 ## 7. Trace 与异常
 
@@ -159,7 +165,7 @@ Session 表示一个独立聊天窗口。同一用户可以有多个 session：
 | 阶段 | 交付 |
 | --- | --- |
 | 1 | 项目骨架、配置、健康检查、领域 Schema、CI |
-| 2 | OpenAI 兼容 LLM Provider、响应解析、Fake Provider 测试 |
+| 2 | OpenAI 兼容 LLM Provider、响应解析、Mock Provider 测试 |
 | 3 | Tool Registry、Schema 校验、Calculator / Search / Todo |
 | 4 | Agent Loop、工具结果回填、停止条件 |
 | 5 | SQLite Session、短期历史、长期 Memory、Context 压缩 |
