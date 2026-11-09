@@ -29,7 +29,9 @@ def get_trace_recorder(request: Request) -> TraceRecorder:
     return recorder
 
 
-def require_user_id(\n    x_user_id: Annotated[str, Header(alias="X-User-ID", min_length=1)],\n) -> str:
+def require_user_id(
+    x_user_id: Annotated[str, Header(alias="X-User-ID", min_length=1)],
+) -> str:
     """Demo identity boundary; production should derive this from authentication."""
     user_id = x_user_id.strip()
     if not user_id:
@@ -40,10 +42,7 @@ def require_user_id(\n    x_user_id: Annotated[str, Header(alias="X-User-ID", mi
 @router.get("/health", tags=["system"], summary="Health check")
 async def health_check() -> dict[str, str]:
     """Return a lightweight process health status."""
-    return {
-        "status": "ok",
-        "service": "minimal-agent-runtime",
-    }
+    return {"status": "ok", "service": "minimal-agent-runtime"}
 
 
 @router.post("/chat", tags=["chat"], summary="Send a message to the Agent")
@@ -73,14 +72,11 @@ async def chat(
 
 @router.get("/sessions", tags=["sessions"], summary="List the user's sessions")
 async def list_sessions(
-    user_id: str = Depends(require_user_id),
-    service: ChatService = Depends(get_chat_service),
+    user_id: Annotated[str, Depends(require_user_id)],
+    service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> list[dict[str, object]]:
     """List sessions owned by the caller."""
-    return [
-        item.model_dump()
-        for item in service.session_store.list_sessions(user_id)
-    ]
+    return [item.model_dump() for item in service.session_store.list_sessions(user_id)]
 
 
 @router.get(
@@ -90,8 +86,8 @@ async def list_sessions(
 )
 async def get_session_messages(
     session_id: str,
-    user_id: str = Depends(require_user_id),
-    service: ChatService = Depends(get_chat_service),
+    user_id: Annotated[str, Depends(require_user_id)],
+    service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> list[dict[str, object]]:
     """Read a session's history after checking ownership."""
     try:
@@ -108,8 +104,8 @@ async def get_session_messages(
 )
 async def delete_session(
     session_id: str,
-    user_id: str = Depends(require_user_id),
-    service: ChatService = Depends(get_chat_service),
+    user_id: Annotated[str, Depends(require_user_id)],
+    service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> dict[str, str]:
     """Delete only a session owned by the caller."""
     try:
@@ -121,9 +117,9 @@ async def delete_session(
 
 @router.get("/traces", tags=["traces"], summary="List recent execution traces")
 async def list_traces(
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    user_id: str = Depends(require_user_id),
+    user_id: Annotated[str, Depends(require_user_id)],
     recorder: Annotated[TraceRecorder, Depends(get_trace_recorder)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> list[dict[str, object]]:
     """List recent traces owned by the caller."""
     return recorder.list_traces(user_id, limit)
@@ -136,8 +132,8 @@ async def list_traces(
 )
 async def get_trace(
     trace_id: str,
-    user_id: str = Depends(require_user_id),
-    recorder: TraceRecorder = Depends(get_trace_recorder),
+    user_id: Annotated[str, Depends(require_user_id)],
+    recorder: Annotated[TraceRecorder, Depends(get_trace_recorder)],
 ) -> dict[str, object]:
     """Read trace metadata and ordered execution events."""
     trace = recorder.get_trace(user_id, trace_id)
