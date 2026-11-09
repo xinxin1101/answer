@@ -12,8 +12,9 @@
 - [x] 阶段 6：ContextManager、自动历史加载、Sliding Window 与基础摘要压缩
 - [x] 阶段 7：SQLite Long-term Memory、规则提取、关键词召回、去重更新与用户隔离
 - [x] 阶段 8：SQLite TraceRecorder、Chat HTTP API、Session API 与 Trace 查询 API
+- [x] 阶段 9：Todo 租户隔离、JWT 认证、SQLite 并发控制、请求幂等、Trace 分页与保留、端到端验收
 
-目前已具备 Agent Runtime 核心，并完成 SQLite 会话与消息持久化。SessionStore 支持按 user_id + session_id 隔离、消息恢复和工具调用消息往返序列化。ChatService 已自动加载 Session 历史并保存本轮消息；ContextManager 提供按完整轮次裁剪和确定性摘要。Chat HTTP API、Session API 和 Trace 查询 API 已接入；TraceRecorder 记录模型调用、工具执行、耗时、状态及异常类型。长期 Memory 已实现独立 SQLite 存储、规则提取、关键词召回、去重更新和用户隔离；ChatService 可在请求前召回并在回答后提取。
+目前已具备 Agent Runtime 核心，并完成 SQLite 会话与消息持久化。SessionStore 支持按 user_id + session_id 隔离、消息恢复和工具调用消息往返序列化。ChatService 已自动加载 Session 历史并保存本轮消息；ContextManager 提供按完整轮次裁剪和确定性摘要。Chat HTTP API、Session API 和 Trace 查询 API 已接入；TraceRecorder 记录模型调用、工具执行、耗时、状态及异常类型。第九阶段进一步完成 Todo 用户隔离、JWT Bearer 身份认证、Session 租约锁、幂等请求、Trace 分页与保留策略，并通过 Mock LLM 端到端验收。长期 Memory 已实现独立 SQLite 存储、规则提取、关键词召回、去重更新和用户隔离；ChatService 可在请求前召回并在回答后提取。
 
 ## 技术选型
 
@@ -90,11 +91,11 @@
 
 ## Chat HTTP API 快速体验
 
-所有业务请求需要演示用身份头 `X-User-ID`。生产环境必须从认证身份获取用户 ID，不应信任客户端自填请求头。
+所有业务请求使用 `Authorization: Bearer <JWT>`。服务端验证签名、issuer、audience 和过期时间后，从 token 的 `sub` 获取用户 ID；不再信任客户端传入的 `X-User-ID`。
 
 ```http
 POST /api/v1/chat
-X-User-ID: demo-user
+Authorization: Bearer <your-access-token>
 Content-Type: application/json
 
 {
@@ -247,4 +248,5 @@ asyncio.run(main())
 - [ContextManager](docs/context-manager.md)
 - [Long-term Memory](docs/long-term-memory.md)
 - [TraceRecorder 与 Chat HTTP API](docs/trace-and-chat-api.md)
+- [工程化完善与最终验收](docs/engineering-hardening.md)
 - [AI Prompt 与问题解决记录](docs/ai-development-log.md)
