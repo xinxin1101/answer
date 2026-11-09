@@ -103,3 +103,21 @@
 - **更新策略**：重复 key upsert；常见后端技术栈偏好归一到同一槽位以支持简单冲突更新；支持显式 expires_at 过滤和 archive。
 - **测试覆盖**：明确偏好提取、临时任务不提取、跨用户隔离、重复更新、关键词排序、跨 Session 召回、偏好槽位冲突更新、过期记忆过滤。
 - **遗留事项**：自然语言语义提取、自动 TTL 推断、复杂冲突审核、向量召回与 rerank、TraceRecorder、Chat HTTP API。
+
+
+## 2026-11-09 / 阶段 8：TraceRecorder 与 Chat HTTP API
+
+- **目标**：让一次 Chat 请求拥有可查询的 trace_id，并通过 FastAPI 完整暴露 Chat、Session 和 Trace 操作。
+- **输入 Prompt 摘要**：先实现 TraceRecorder，记录 Agent Loop、LLM 请求、工具执行、耗时、状态和异常；再将 ChatService 接入 HTTP API。
+- **新增文件**：trace/recorder.py、trace/__init__.py、api/schemas.py、docs/trace-and-chat-api.md、test_trace.py、test_api.py。
+- **修改文件**：runtime.py、chat/service.py、api/routes.py、main.py、README.md、architecture.md。
+- **设计决策**：
+  1. SQLite 分为 traces 与 trace_events 两张表；一个 trace 关联一个 session，事件按自增 event_id 排序。
+  2. Runtime 通过可选 TraceRecorder 依赖记录 runtime、LLM 和 tool 事件；Trace 写入失败不应阻断 Agent 主流程。
+  3. ChatService 在开始时创建 trace，在完成或异常时关闭 trace，并将 trace_id 返回给调用方。
+  4. Trace 不保存原始 prompt、模型回复正文、工具参数值、工具输出正文、API Key 或 Authorization Header；只记录参数 key、输出长度、事件状态和耗时。
+  5. API 暴露 POST /chat、Session 列表/消息读取/删除、Trace 列表/详情；所有资源查询同时校验 user_id。
+  6. X-User-ID 仅作为教学项目的身份隔离演示，生产环境必须替换为可信认证中间件。
+- **测试覆盖**：Trace 成功与失败生命周期、耗时和事件顺序、敏感字段过滤、跨用户 Trace 隔离、Chat API 创建会话并返回 trace_id、Trace API 查询、Session 与 Trace 越权读取拒绝、缺失身份头校验。
+- **验证命令及结果**：GitHub Actions 的 Ruff 与 Pytest 全部通过，69 项测试通过。运行记录：https://github.com/xinxin1101/answer/actions/runs/42614507642
+- **遗留事项**：更完善的认证接入、Trace 分页/保留策略、异步批量写入、并发压测和端到端真实模型演示。
