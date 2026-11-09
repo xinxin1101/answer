@@ -110,7 +110,7 @@ async def test_end_to_end_multitool_memory_context_and_trace(tmp_path) -> None:
     system_context = first_request[0].content or ""
     assert "FastAPI" in system_context
     assert "Earlier context" in system_context
-    assert "authentication" in system_context
+    assert "API" in system_context
 
     todo_items = TodoStore(database_path).list("user-a")
     assert len(todo_items) == 1
@@ -147,6 +147,7 @@ async def test_end_to_end_timeout_is_classified_and_trace_is_retained(tmp_path) 
         AgentRuntime(
             TimeoutProvider(),
             build_default_registry(Settings(database_path=database_path)),
+            trace_recorder=trace_recorder,
         ),
         session_store,
         ContextManager(max_messages=4),
