@@ -93,3 +93,13 @@
 - **设计决策**：原始历史完整保存在 SQLite；按完整用户轮次裁剪；工具调用及结果不拆分；使用确定性抽取式摘要；Runtime 接收 context_summary；ChatService 只保存本轮新消息。
 - **测试覆盖**：历史裁剪和摘要、工具调用轮次完整性、空历史、连续追问、工具结果追问、跨用户 Session 拒绝访问。
 - **遗留事项**：HTTP Chat API、长期 Memory、TraceRecorder、Token 预算控制和摘要质量增强。
+
+
+## 2026-11-09 / 阶段 7：Long-term Memory
+
+- **目标**：实现跨 Session 的记忆提取、持久化、召回、排序、更新和用户隔离。
+- **模块**：MemoryExtractor、MemoryStore、MemoryService、MemoryCandidate / MemoryItem / MemorySearchResult。
+- **设计决策**：独立 SQLite memories 表；唯一键 (user_id, memory_key)；只从用户原始输入提取；ChatService 在模型调用前召回、回答后保存；记忆以非指令参考信息注入 system context。
+- **更新策略**：重复 key upsert；常见后端技术栈偏好归一到同一槽位以支持简单冲突更新；支持显式 expires_at 过滤和 archive。
+- **测试覆盖**：明确偏好提取、临时任务不提取、跨用户隔离、重复更新、关键词排序、跨 Session 召回、偏好槽位冲突更新、过期记忆过滤。
+- **遗留事项**：自然语言语义提取、自动 TTL 推断、复杂冲突审核、向量召回与 rerank、TraceRecorder、Chat HTTP API。
