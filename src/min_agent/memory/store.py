@@ -4,8 +4,10 @@ import re
 import sqlite3
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
-from pathlib import Path
+from contextlib import closing, contextmanager
+from threading import RLock
+
+from min_agent.storage.sqlite import connect_sqlite, enable_wal, prepare_database_path
 
 from min_agent.memory.models import (
     MemoryCandidate,
@@ -19,27 +21,24 @@ class MemoryStore:
 
     def __init__(self, database_path: str) -> None:
         self.database_path = database_path
-        if database_path != ":memory:":
-            Path(database_path).parent.mkdir(parents=True, exist_ok=True)
+        prepare_database_path(database_path)
         self._memory_connection = (
-            sqlite3.connect(":memory:", timeout=5.0)
-            if database_path == ":memory:"
-            else None
+            connect_sqlite(":memory:") if database_path == ":memory:" else None
         )
+        self._memory_lock = RLock()
+        enable_wal(database_path)
         self._initialize()
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         connection = self._memory_connection
-        should_close = connection is None
-        if connection is None:
-            connection = sqlite3.connect(self.database_path, timeout=5.0)
-        connection.row_factory = sqlite3.Row
-        try:
-            yield connection
-        finally:
-            if should_close:
-                connection.close()
+        if connection is not None:
+            with self._memory_lock, connection:
+                yield connection
+            return
+        with closing(connect_sqlite(self.database_path)) as connection:
+            with connection:
+                yield connection
 
     def _initialize(self) -> None:
         with self._connection() as connection:
