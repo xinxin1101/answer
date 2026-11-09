@@ -6,7 +6,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
-ToolHandler = Callable[[BaseModel], Any | Awaitable[Any]]
+ToolHandler = Callable[..., Any | Awaitable[Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolExecutionContext:
+    """Trusted execution metadata supplied by Runtime, never by model arguments."""
+
+    user_id: str
+    session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +26,7 @@ class ToolDefinition:
     args_model: type[BaseModel]
     handler: ToolHandler
     timeout_seconds: float = 10.0
+    context_aware: bool = False
 
 
 class ToolExecutionResult(BaseModel):
@@ -27,3 +36,4 @@ class ToolExecutionResult(BaseModel):
     success: bool
     output: Any = None
     error: str | None = None
+    error_category: str | None = None
