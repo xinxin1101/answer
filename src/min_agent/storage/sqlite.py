@@ -3,7 +3,6 @@
 import sqlite3
 from pathlib import Path
 
-
 SQLITE_TIMEOUT_SECONDS = 10.0
 SQLITE_BUSY_TIMEOUT_MS = 10_000
 
