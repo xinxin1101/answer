@@ -53,3 +53,20 @@
 - **定位与解决**：根据 Actions 日志修复导入排序和超长行；通过递归检查 Git Tree 发现 LLM 文件缺失，再从阶段 2 的提交恢复，并将阶段 2 和阶段 3 文件放入同一完整仓库树。
 - **验证命令及结果**：恢复阶段 2 的 LLM Provider、解析器、集成文档和测试后，GitHub Actions 完整执行 Ruff 与 Pytest，31 项测试全部通过。运行记录：https://github.com/xinxin1101/answer/actions/runs/42590669474
 - **遗留事项**：实现 Agent Loop，将 LLMProvider、ToolRegistry 和 ChatMessage/ToolCall 连接起来。
+
+## 2026-11-09 / 阶段 4：Agent Loop 与工具结果回填
+
+- **目标**：连接 LLM Provider 和 Tool Registry，让模型能够自主提出工具调用、由 Runtime 执行并将结果交回模型，直到生成最终答案。
+- **输入 Prompt 摘要**：实现 AgentRuntime、run() 循环、assistant tool_calls / tool result 消息、多工具调用和最大步数限制。
+- **修改文件**：runtime.py、core/schemas.py、llm/protocol.py、llm/openai_compatible.py、test_runtime.py、test_schemas.py、test_llm_provider.py、README、architecture.md、agent-loop.md。
+- **设计决策**：
+  1. AgentRuntime 通过依赖注入接收 LLMProvider 和 ToolRegistry，不绑定具体模型 SDK。
+  2. 每次 LLM 请求计为一个 step；同一响应中的多个工具调用按返回顺序串行执行，降低数据库写操作等副作用并发造成的竞态。
+  3. 工具调用结果以 role=tool 的消息回填，并使用 tool_call_id 与 assistant tool_calls 关联。
+  4. ToolRegistry 的未知工具、参数校验失败和 handler 异常会作为结构化失败结果交给模型，而不是直接丢弃。
+  5. history 只接收既有会话消息；system prompt 由 Runtime 统一注入，避免外部历史覆盖系统约束。
+  6. 达到 max_steps 后停止继续请求模型，并返回明确的停止原因。
+- **遇到的问题**：第一次 CI 检查发现 runtime.py 的 Ruff I001 导入块格式问题。
+- **定位与解决**：根据 GitHub Actions 日志逐步对齐 Ruff 的导入块与空行规则，随后完整执行 Lint 和测试。
+- **验证命令及结果**：GitHub Actions Ruff 检查通过，Pytest 收集 43 项并全部通过。运行记录：https://github.com/xinxin1101/answer/actions/runs/42593722485
+- **遗留事项**：下一阶段实现 SQLite Session、短期历史持久化、长期 Memory 召回和 Context 压缩；随后增加 API 路由、Trace 和异常恢复。
