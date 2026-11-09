@@ -146,3 +146,71 @@ def test_empty_user_id_is_rejected(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="user_id"):
         store.create_session("   ")
+
+
+@pytest.mark.asyncio
+async def test_session_lock_serializes_concurrent_turns(tmp_path) -> None:
+    import asyncio
+
+    store = SessionStore(str(tmp_path / "locks.db"))
+    session = store.create_session("user-a")
+    order: list[str] = []
+
+    async def first_request() -> None:
+        async with store.session_lock("user-a", session.session_id):
+            order.append("first-start")
+            await asyncio.sleep(0.05)
+            order.append("first-end")
+
+    async def second_request() -> None:
+        await asyncio.sleep(0.005)
+        async with store.session_lock("user-a", session.session_id):
+            order.append("second-start")
+            order.append("second-end")
+
+    await asyncio.gather(first_request(), second_request())
+
+    assert order == [
+        "first-start",
+        "first-end",
+        "second-start",
+        "second-end",
+    ]
+
+
+def test_idempotency_claim_replay_and_payload_conflict(tmp_path) -> None:
+    from min_agent.sessions.store import (
+        IdempotencyConflictError,
+        IdempotencyInProgressError,
+    )
+
+    store = SessionStore(str(tmp_path / "idempotency.db"))
+    assert store.claim_idempotency_request("user-a", "key-1", "hash-a") is None
+
+    with pytest.raises(IdempotencyInProgressError):
+        store.claim_idempotency_request("user-a", "key-1", "hash-a")
+
+    store.complete_idempotency_request(
+        "user-a",
+        "key-1",
+        {"reply": "once", "session_id": "session-1"},
+    )
+    replay = store.claim_idempotency_request("user-a", "key-1", "hash-a")
+    assert replay == {"reply": "once", "session_id": "session-1"}
+
+    with pytest.raises(IdempotencyConflictError):
+        store.claim_idempotency_request("user-a", "key-1", "different-hash")
+
+
+def test_file_database_uses_wal_and_foreign_keys(tmp_path) -> None:
+    import sqlite3
+
+    database_path = str(tmp_path / "sqlite-pragmas.db")
+    SessionStore(database_path)
+    connection = sqlite3.connect(database_path)
+    journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+    foreign_keys = connection.execute("PRAGMA foreign_keys").fetchone()[0]
+    connection.close()
+
+    assert journal_mode.lower() == "wal"
+    assert foreign_keys == 0  # Foreign keys are enabled per application connection.
