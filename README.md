@@ -42,7 +42,10 @@
 │   ├── sessions.md
 │   ├── architecture.md
 │   ├── llm-integration.md
-│   └── tools.md
+│   ├── tools.md
+│   ├── context-manager.md
+│   ├── long-term-memory.md
+│   └── trace-and-chat-api.md
 ├── src/min_agent/
 │   ├── api/
 │   │   ├── routes.py
@@ -75,8 +78,8 @@
 │   ├── test_llm_parser.py
 │   ├── test_llm_provider.py
 │   ├── test_memory.py
-│   ├── test_trace.py
 │   ├── test_api.py
+│   ├── test_trace.py
 │   ├── test_runtime.py
 │   ├── test_schemas.py
 │   └── test_tool_registry.py
