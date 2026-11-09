@@ -7,7 +7,6 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager, closing, contextmanager
-from pathlib import Path
 from threading import RLock
 from typing import Literal
 
