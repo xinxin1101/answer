@@ -1,4 +1,4 @@
-"""SQLite-backed todo tool with add, list and complete operations."""
+"""User-scoped SQLite todo tool with safe legacy-data migration."""
 
 import sqlite3
 from collections.abc import Iterator
@@ -8,7 +8,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from min_agent.tools.base import ToolDefinition
+from min_agent.storage.sqlite import connect_sqlite, enable_wal, prepare_database_path
+from min_agent.tools.base import ToolDefinition, ToolExecutionContext
+
+
+_LEGACY_OWNER = "__legacy_unassigned__"
 
 
 class TodoArgs(BaseModel):
@@ -34,15 +38,15 @@ class TodoArgs(BaseModel):
 
 
 class TodoStore:
-    """Small SQLite repository with short-lived file connections."""
+    """Persist todos with mandatory user ownership on every operation."""
 
     def __init__(self, database_path: str) -> None:
         self.database_path = database_path
-        self._memory_connection = None
-        if database_path == ":memory:":
-            self._memory_connection = sqlite3.connect(":memory:", timeout=5.0)
-        else:
-            Path(database_path).parent.mkdir(parents=True, exist_ok=True)
+        prepare_database_path(database_path)
+        self._memory_connection = (
+            connect_sqlite(":memory:") if database_path == ":memory:" else None
+        )
+        enable_wal(database_path)
         self._initialize()
 
     @contextmanager
@@ -51,8 +55,7 @@ class TodoStore:
             with self._memory_connection:
                 yield self._memory_connection
             return
-
-        with closing(sqlite3.connect(self.database_path, timeout=5.0)) as connection:
+        with closing(connect_sqlite(self.database_path)) as connection:
             with connection:
                 yield connection
 
@@ -62,52 +65,91 @@ class TodoStore:
                 """
                 CREATE TABLE IF NOT EXISTS todos (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL DEFAULT '__legacy_unassigned__',
                     title TEXT NOT NULL,
                     completed INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(todos)").fetchall()
+            }
+            if "user_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE todos ADD COLUMN user_id TEXT NOT NULL "
+                    "DEFAULT '__legacy_unassigned__'"
+                )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_todos_user_id ON todos(user_id, id DESC)"
+            )
 
-    def add(self, title: str) -> dict[str, object]:
+    @staticmethod
+    def _validate_user_id(user_id: str) -> str:
+        owner = user_id.strip()
+        if not owner or owner == _LEGACY_OWNER:
+            raise ValueError("A valid authenticated user_id is required.")
+        return owner
+
+    def add(self, user_id: str, title: str) -> dict[str, object]:
+        owner = self._validate_user_id(user_id)
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise ValueError("title must not be blank")
         with self._connection() as connection:
-            cursor = connection.execute("INSERT INTO todos (title) VALUES (?)", (title.strip(),))
+            cursor = connection.execute(
+                "INSERT INTO todos (user_id, title) VALUES (?, ?)",
+                (owner, normalized_title),
+            )
             row = connection.execute(
-                "SELECT id, title, completed, created_at FROM todos WHERE id = ?",
-                (cursor.lastrowid,),
+                """
+                SELECT id, user_id, title, completed, created_at
+                FROM todos WHERE id = ? AND user_id = ?
+                """,
+                (cursor.lastrowid, owner),
             ).fetchone()
         return self._serialize(row)
 
-    def list(self) -> list[dict[str, object]]:
+    def list(self, user_id: str) -> list[dict[str, object]]:
+        owner = self._validate_user_id(user_id)
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT id, title, completed, created_at FROM todos ORDER BY id DESC"
+                """
+                SELECT id, user_id, title, completed, created_at
+                FROM todos WHERE user_id = ? ORDER BY id DESC
+                """,
+                (owner,),
             ).fetchall()
         return [self._serialize(row) for row in rows]
 
-    def complete(self, todo_id: int) -> dict[str, object]:
+    def complete(self, user_id: str, todo_id: int) -> dict[str, object]:
+        owner = self._validate_user_id(user_id)
         with self._connection() as connection:
             cursor = connection.execute(
-                "UPDATE todos SET completed = 1 WHERE id = ?",
-                (todo_id,),
+                "UPDATE todos SET completed = 1 WHERE id = ? AND user_id = ?",
+                (todo_id, owner),
             )
             if cursor.rowcount == 0:
-                raise ValueError(f"Todo {todo_id} does not exist.")
+                raise ValueError("Todo was not found for this user.")
             row = connection.execute(
-                "SELECT id, title, completed, created_at FROM todos WHERE id = ?",
-                (todo_id,),
+                """
+                SELECT id, user_id, title, completed, created_at
+                FROM todos WHERE id = ? AND user_id = ?
+                """,
+                (todo_id, owner),
             ).fetchone()
         return self._serialize(row)
 
     @staticmethod
-    def _serialize(row: tuple[object, ...] | None) -> dict[str, object]:
+    def _serialize(row: sqlite3.Row | None) -> dict[str, object]:
         if row is None:
             raise RuntimeError("Todo record was not found after database operation.")
         return {
-            "id": row[0],
-            "title": row[1],
-            "completed": bool(row[2]),
-            "created_at": row[3],
+            "id": row["id"],
+            "title": row["title"],
+            "completed": bool(row["completed"]),
+            "created_at": row["created_at"],
         }
 
 
@@ -115,22 +157,28 @@ class TodoHandler:
     def __init__(self, store: TodoStore) -> None:
         self.store = store
 
-    async def __call__(self, args: TodoArgs) -> dict[str, object] | list[dict[str, object]]:
+    async def __call__(
+        self,
+        args: TodoArgs,
+        context: ToolExecutionContext,
+    ) -> dict[str, object] | list[dict[str, object]]:
+        user_id = context.user_id
         if args.action == "add":
-            return self.store.add(args.title or "")
+            return self.store.add(user_id, args.title or "")
         if args.action == "list":
-            return self.store.list()
-        return self.store.complete(args.todo_id or 0)
+            return self.store.list(user_id)
+        return self.store.complete(user_id, args.todo_id or 0)
 
 
 def build_todo_tool(database_path: str) -> ToolDefinition:
     return ToolDefinition(
         name="todo",
         description=(
-            "Manage the user's todo list. Use action='add' with title to create a task, "
-            "action='list' to view tasks, or action='complete' with todo_id to finish one."
+            "Manage the authenticated user's todo list. Use action='add' with title to create "
+            "a task, action='list' to view tasks, or action='complete' with todo_id to finish one."
         ),
         args_model=TodoArgs,
         handler=TodoHandler(TodoStore(database_path)),
         timeout_seconds=5.0,
+        context_aware=True,
     )
