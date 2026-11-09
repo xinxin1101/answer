@@ -17,6 +17,8 @@ from min_agent.sessions.store import SessionStore
 from min_agent.tools.defaults import build_default_registry
 from min_agent.trace.recorder import TraceRecorder
 
+_DEV_JWT_SECRET = "dev-only-insecure-secret-change-before-deploy-000000000000"
+
 
 def create_app(
     config: Settings | None = None,
@@ -24,6 +26,12 @@ def create_app(
 ) -> FastAPI:
     """Create an app; dependencies can be injected for deterministic API tests."""
     app_settings = config or settings
+    if (
+        app_settings.app_env.lower() in {"prod", "production"}
+        and app_settings.jwt_secret == _DEV_JWT_SECRET
+    ):
+        raise ValueError("Production requires a unique JWT_SECRET from a secret manager.")
+
     injected_service = chat_service
 
     @asynccontextmanager
@@ -32,11 +40,18 @@ def create_app(
         if injected_service is not None:
             application.state.chat_service = injected_service
             application.state.trace_recorder = injected_service.trace_recorder
+            if injected_service.trace_recorder is not None:
+                injected_service.trace_recorder.prune_older_than(
+                    app_settings.trace_retention_days
+                )
+            injected_service.session_store.prune_idempotency_requests()
         else:
             provider = OpenAICompatibleProvider(app_settings)
             session_store = SessionStore(app_settings.database_path)
             memory_service = MemoryService(MemoryStore(app_settings.database_path))
             trace_recorder = TraceRecorder(app_settings.database_path)
+            trace_recorder.prune_older_than(app_settings.trace_retention_days)
+            session_store.prune_idempotency_requests()
             runtime = AgentRuntime(
                 provider,
                 build_default_registry(app_settings),
@@ -59,10 +74,11 @@ def create_app(
 
     application = FastAPI(
         title=app_settings.app_name,
-        version="0.2.0",
+        version="0.3.0",
         description="A minimal Agent Runtime implemented from scratch.",
         lifespan=lifespan,
     )
+    application.state.settings = app_settings
     application.include_router(router, prefix=app_settings.api_prefix)
     return application
 
