@@ -80,7 +80,7 @@ async def test_end_to_end_multi_tool_memory_tenant_isolation_and_trace(tmp_path)
     )
     second = await service.chat(
         "user-a",
-        "我偏好什么后端框架？",
+        "FastAPI 后端项目的技术偏好是什么？",
     )
 
     todo_store = TodoStore(database_path)
