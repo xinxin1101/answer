@@ -53,3 +53,25 @@ def test_retrieval_and_archive(tmp_path) -> None:
     assert "FastAPI" in results[0].item.content
     assert store.archive("user-a", results[0].item.memory_id)
     assert len(store.list_active("user-a")) == 1
+
+
+def test_extractor_updates_same_preference_slot() -> None:
+    extractor = MemoryExtractor()
+    first = extractor.extract("以后我所有后端项目都优先使用 FastAPI。")
+    changed = extractor.extract("以后我所有后端项目都优先使用 Django。")
+
+    assert first[0].memory_key == changed[0].memory_key
+
+
+def test_expired_memory_is_not_recalled(tmp_path) -> None:
+    store = MemoryStore(str(tmp_path / "memory.db"))
+    candidate = MemoryCandidate(
+        memory_key="preference:expired",
+        content="Expired preference",
+        category="preference",
+        expires_at="2000-01-01 00:00:00",
+    )
+    store.upsert("user-a", candidate)
+
+    assert store.list_active("user-a") == []
+    assert store.search("user-a", "Expired preference") == []
