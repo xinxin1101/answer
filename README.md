@@ -7,12 +7,12 @@
 - [x] 阶段 1：项目骨架、配置管理、FastAPI 健康检查、基础领域模型与 CI
 - [x] 阶段 2：OpenAI 兼容 LLM Provider、响应解析与 Mock 测试
 - [x] 阶段 3：Tool Registry、JSON Schema 参数校验、Calculator / Search / Todo
-- [ ] 阶段 4：Agent Loop、工具结果回填与停止条件
+- [x] 阶段 4：Agent Loop、工具结果回填、多工具调用与最大步数限制
 - [ ] 阶段 5：SQLite Session、短期历史、长期 Memory 与 Context 压缩
 - [ ] 阶段 6：Trace、超时、重试边界与异常恢复
 - [ ] 阶段 7：集成测试、演示用例与最终验收
 
-当前已完成 LLM 接入和独立工具执行模块；尚未把它们串成完整 Agent 对话循环。每个阶段都配套测试和开发记录。
+目前已具备可编程调用的 Agent Runtime 核心。对话历史仍由调用方传入和接收，尚未持久化为 Session；HTTP Chat API 也将在后续阶段接入。
 
 ## 技术选型
 
@@ -22,6 +22,7 @@
 | HTTP 服务 | FastAPI + Uvicorn |
 | 配置与数据校验 | Pydantic Settings / Pydantic |
 | LLM 接入 | httpx + OpenAI-compatible Chat Completions |
+| Agent 调度 | 自行实现 AgentRuntime |
 | 工具执行 | 自行实现 ToolRegistry + Pydantic JSON Schema |
 | Todo 持久化 | SQLite |
 | 测试 | Pytest + httpx.MockTransport |
@@ -36,6 +37,7 @@
 ├── .github/workflows/tests.yml
 ├── docs/
 │   ├── ai-development-log.md
+│   ├── agent-loop.md
 │   ├── architecture.md
 │   ├── llm-integration.md
 │   └── tools.md
@@ -55,12 +57,14 @@
 │   │   ├── search.py
 │   │   └── todo.py
 │   ├── config.py
-│   └── main.py
+│   ├── main.py
+│   └── runtime.py
 ├── tests/
 │   ├── test_builtin_tools.py
 │   ├── test_health.py
 │   ├── test_llm_parser.py
 │   ├── test_llm_provider.py
+│   ├── test_runtime.py
 │   ├── test_schemas.py
 │   └── test_tool_registry.py
 ├── .env.example
@@ -128,6 +132,40 @@ pytest
 ruff check src tests
 ~~~
 
+## Agent Runtime 快速使用
+
+在项目根目录创建一个 Python 脚本：
+
+~~~python
+import asyncio
+
+from min_agent.config import settings
+from min_agent.llm.openai_compatible import OpenAICompatibleProvider
+from min_agent.runtime import AgentRuntime
+from min_agent.tools.defaults import build_default_registry
+
+
+async def main() -> None:
+    registry = build_default_registry(settings)
+
+    async with OpenAICompatibleProvider(settings) as llm:
+        agent = AgentRuntime(
+            llm=llm,
+            tool_registry=registry,
+            max_steps=settings.max_agent_steps,
+        )
+        result = await agent.run("请计算 100 * 25，并解释计算结果。")
+
+        print(result.reply)
+        print("LLM steps:", result.steps)
+        print("Tool calls:", result.tool_calls_executed)
+
+
+asyncio.run(main())
+~~~
+
+运行前需要在本地 .env 中配置有效的 LLM_API_KEY、LLM_BASE_URL 和 LLM_MODEL。
+
 ## 工具模块快速使用
 
 ~~~python
@@ -169,6 +207,7 @@ asyncio.run(main())
 
 详细设计见：
 - [系统架构](docs/architecture.md)
+- [Agent Loop](docs/agent-loop.md)
 - [LLM 接入](docs/llm-integration.md)
 - [工具注册与执行](docs/tools.md)
 - [AI Prompt 与问题解决记录](docs/ai-development-log.md)

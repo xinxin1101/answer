@@ -124,3 +124,57 @@ async def test_provider_sanitizes_http_error() -> None:
         await provider.complete([ChatMessage(role="user", content="hello")])
     assert "secret diagnostic" not in str(error.value)
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_provider_serializes_assistant_tool_call_and_tool_result_messages() -> None:
+    seen: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen["messages"] = json.loads(request.content)["messages"]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "The result is 3."},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    from min_agent.core.schemas import ToolCall
+
+    messages = [
+        ChatMessage(role="user", content="Calculate 1 + 2."),
+        ChatMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call-1",
+                    name="calculator",
+                    arguments={"expression": "1 + 2"},
+                )
+            ],
+        ),
+        ChatMessage(
+            role="tool",
+            name="calculator",
+            tool_call_id="call-1",
+            content='{"tool_name":"calculator","success":true,"output":{"result":3}}',
+        ),
+    ]
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleProvider(make_settings(), client=client)
+
+    result = await provider.complete(messages)
+
+    serialized = seen["messages"]
+    assert serialized[1]["tool_calls"][0]["function"]["name"] == "calculator"
+    assert serialized[1]["tool_calls"][0]["id"] == "call-1"
+    assert serialized[2]["role"] == "tool"
+    assert serialized[2]["tool_call_id"] == "call-1"
+    assert result.content == "The result is 3."
+    await client.aclose()

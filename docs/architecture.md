@@ -49,26 +49,32 @@ AgentRuntime ---------------------- TraceRecorder
 | MemoryStore | 保存可跨会话复用的长期信息 |
 | TraceRecorder | 记录步骤、工具、耗时、状态和异常 |
 
-## 3. Agent Loop
+## 3. Agent Loop（阶段 4 已实现）
 
-计划采用显式循环，而不是把流程交给 Agent 框架：
+AgentRuntime 使用显式循环组织模型调用和工具执行：
 
 ~~~python
-for step in range(max_agent_steps):
-    response = await llm.complete(messages, tools=registry.schemas())
+for step in range(1, max_steps + 1):
+    response = await llm.complete(
+        messages,
+        tools=tool_registry.schemas(),
+    )
 
     if response.tool_calls:
+        messages.append(assistant_tool_call_message(response.tool_calls))
         for call in response.tool_calls:
-            result = await registry.execute(call.name, call.arguments)
-            append_tool_result(messages, call.id, result)
+            result = await tool_registry.execute(call.name, call.arguments)
+            messages.append(tool_result_message(call.id, result))
         continue
 
-    return response.content or ""
+    return response.content or fallback_reply
 
-return "本轮执行达到最大步骤限制，请缩小任务范围后重试。"
+return max_steps_reply
 ~~~
 
-上面是流程示意，不是当前已经完成的实现。下一阶段将实现 AgentRuntime，并补充 assistant tool-call 消息和 tool result 消息的上下文表示。
+一个 step 表示一次 LLM 请求。一次响应可以包含多个工具调用；当前按模型返回顺序串行执行，确保带副作用工具的执行次序可预测。工具调用结果使用匹配的 tool_call_id 回填，然后进入下一轮模型请求。
+
+当前 AgentRuntime 支持传入历史消息并返回本轮完整消息序列，但不负责历史持久化。SessionStore 将在下一阶段实现。
 
 ## 4. Context 如何构建
 
