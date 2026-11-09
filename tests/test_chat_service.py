@@ -39,7 +39,7 @@ async def test_chat_service_creates_session_and_supports_follow_up(tmp_path) -> 
     first = await service.chat("user-a", "I prefer Python.")
     second = await service.chat("user-a", "What language did I mention?", first.session_id)
     assert first.session_id == second.session_id
-    assert provider.requests[1][-2].content == "I prefer Python."
+    assert provider.requests[1][-3].content == "I prefer Python."
     assert provider.requests[1][-1].content == "What language did I mention?"
 
 
