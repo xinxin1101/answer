@@ -74,7 +74,7 @@ return max_steps_reply
 
 一个 step 表示一次 LLM 请求。一次响应可以包含多个工具调用；当前按模型返回顺序串行执行，确保带副作用工具的执行次序可预测。工具调用结果使用匹配的 tool_call_id 回填，然后进入下一轮模型请求。
 
-当前 AgentRuntime 支持传入历史消息并返回本轮完整消息序列。阶段 5 已实现 SQLite SessionStore / MessageStore，负责会话创建、消息追加、历史恢复和 user_id + session_id 所有权校验；Runtime 与存储仍保持解耦，由后续 Chat Service 编排。
+当前 AgentRuntime 支持传入历史消息并返回本轮完整消息序列。SQLite SessionStore / MessageStore 负责会话创建、消息追加、历史恢复和 user_id + session_id 所有权校验；ChatService 负责将 Runtime、ContextManager、MemoryService 和 TraceRecorder 串联。
 
 ## 4. Context 如何构建
 
@@ -152,21 +152,37 @@ Session 表示一个独立聊天窗口。同一用户可以有多个 session：
 
 模型返回的参数始终是不可信输入。JSON 解析成功不代表参数可信，仍必须经过工具 Schema 校验和后续权限检查。禁止使用 eval 执行模型生成的表达式。
 
-工具执行结果应有大小限制，避免大段文档或搜索结果挤占上下文。当前 Registry 已有超时和统一错误结构；权限策略、调用去重和完整 Trace 将在后续阶段接入。
+工具执行结果应有大小限制，避免大段文档或搜索结果挤占上下文。当前 Registry 已有超时和统一错误结构；TraceRecorder 已记录工具名、参数 key、执行状态、耗时和结果大小，不记录工具参数值及输出正文。
 
-## 7. Trace 与异常
+## 7. Trace 与异常（阶段 8 已实现）
 
-一次 Agent 请求分配 trace_id。建议记录：
+每次 ChatService 请求分配 trace_id。TraceRecorder 使用 SQLite 的 traces 和 trace_events 表持久化：
 
 - trace_id、session_id、step_index。
 - LLM 请求开始/结束时间、耗时和响应状态。
 - 模型提出的工具名、参数校验结果。
 - 工具执行开始/结束时间、耗时、成功/失败状态。
-- 循环退出原因：final_answer、max_steps、error、cancelled。
+- 循环退出原因：final_answer、max_steps、error。
+- 通过 GET /api/v1/traces/{trace_id} 查询有序事件；按 user_id 隔离。
+
+Trace 不存储原始提示词、模型回复正文、工具参数值、工具输出正文、API Key 或 Authorization Header。异常仅保存类型，避免异常文本泄露凭据。
 
 不要记录 API Key、Authorization Header 或其他凭据。日志中对用户输入和工具输出应考虑长度限制及敏感信息脱敏。
 
-## 8. 分阶段交付
+## 8. Chat HTTP API（阶段 8 已实现）
+
+FastAPI 路由由项目自有 ChatService 处理：
+
+- POST /api/v1/chat：创建或继续 Session，返回 reply、session_id、trace_id。
+- GET /api/v1/sessions：列出当前用户 Session。
+- GET /api/v1/sessions/{session_id}/messages：读取历史消息。
+- DELETE /api/v1/sessions/{session_id}：删除 Session。
+- GET /api/v1/traces：列出近期 Trace。
+- GET /api/v1/traces/{trace_id}：读取 Trace 与事件。
+
+演示版本通过 X-User-ID 请求头区分用户；生产环境必须接入认证系统并从可信身份中间件获取 user_id。
+
+## 9. 分阶段交付
 
 | 阶段 | 交付 |
 | --- | --- |
@@ -174,6 +190,7 @@ Session 表示一个独立聊天窗口。同一用户可以有多个 session：
 | 2 | OpenAI 兼容 LLM Provider、响应解析、Mock Provider 测试 |
 | 3 | Tool Registry、Schema 校验、Calculator / Search / Todo |
 | 4 | Agent Loop、工具结果回填、停止条件 |
-| 5 | SQLite Session、短期历史、长期 Memory、Context 压缩 |
-| 6 | Trace、超时、重试边界、异常恢复 |
-| 7 | 集成测试、README 完善、演示用例和最终验收 |
+| 5 | SQLite Session、短期历史、ContextManager |
+| 6 | Sliding Window 与基础摘要压缩 |
+| 7 | SQLite Long-term Memory、提取、召回、更新、隔离 |
+| 8 | TraceRecorder、Chat HTTP API、Session API、Trace 查询和集成测试 |
