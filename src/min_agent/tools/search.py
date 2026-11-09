@@ -15,17 +15,26 @@ class SearchArgs(BaseModel):
 MOCK_DOCUMENTS = [
     {
         "title": "Agent Runtime",
-        "snippet": "An Agent Runtime coordinates model calls, tool execution, context and stopping conditions.",
+        "snippet": (
+            "An Agent Runtime coordinates model calls, tool execution, context "
+            "and stopping conditions."
+        ),
         "keywords": {"agent", "runtime", "loop", "tool"},
     },
     {
         "title": "Tool Calling",
-        "snippet": "The model proposes structured tool calls; the application validates and executes them.",
+        "snippet": (
+            "The model proposes structured tool calls; the application validates "
+            "and executes them."
+        ),
         "keywords": {"tool", "calling", "schema", "function"},
     },
     {
         "title": "Memory and Context",
-        "snippet": "Conversation history, summaries and relevant long-term memories form the model context.",
+        "snippet": (
+            "Conversation history, summaries and relevant long-term memories "
+            "form the model context."
+        ),
         "keywords": {"memory", "context", "history", "summary"},
     },
 ]

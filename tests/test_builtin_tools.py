@@ -1,6 +1,7 @@
 import pytest
 
 from min_agent.tools.calculator import build_calculator_tool
+from min_agent.tools.defaults import build_default_registry
 from min_agent.tools.registry import ToolRegistry
 from min_agent.tools.search import build_search_tool
 from min_agent.tools.todo import build_todo_tool
@@ -10,9 +11,7 @@ from min_agent.tools.todo import build_todo_tool
 async def test_calculator_computes_basic_expression() -> None:
     registry = ToolRegistry()
     registry.register(build_calculator_tool())
-
     result = await registry.execute("calculator", {"expression": "(12 + 8) * 3 / 2"})
-
     assert result.success is True
     assert result.output["result"] == 30
 
@@ -31,9 +30,7 @@ async def test_calculator_computes_basic_expression() -> None:
 async def test_calculator_rejects_unsafe_or_invalid_expressions(expression: str) -> None:
     registry = ToolRegistry()
     registry.register(build_calculator_tool())
-
     result = await registry.execute("calculator", {"expression": expression})
-
     assert result.success is False
 
 
@@ -41,9 +38,7 @@ async def test_calculator_rejects_unsafe_or_invalid_expressions(expression: str)
 async def test_search_mock_returns_deterministic_results() -> None:
     registry = ToolRegistry()
     registry.register(build_search_tool())
-
     result = await registry.execute("search", {"query": "agent runtime", "limit": 2})
-
     assert result.success is True
     assert result.output["mock"] is True
     assert result.output["results"][0]["title"] == "Agent Runtime"
@@ -73,8 +68,34 @@ async def test_todo_add_list_complete_persists(tmp_path) -> None:
 async def test_todo_validates_action_specific_arguments(tmp_path) -> None:
     registry = ToolRegistry()
     registry.register(build_todo_tool(str(tmp_path / "agent.db")))
-
     result = await registry.execute("todo", {"action": "add"})
-
     assert result.success is False
     assert "title is required" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_todo_supports_in_memory_database() -> None:
+    registry = ToolRegistry()
+    registry.register(build_todo_tool(":memory:"))
+    added = await registry.execute("todo", {"action": "add", "title": "In-memory task"})
+    listed = await registry.execute("todo", {"action": "list"})
+    assert added.success is True
+    assert len(listed.output) == 1
+
+
+def test_default_registry_contains_required_tools(tmp_path) -> None:
+    from min_agent.config import Settings
+
+    config = Settings(database_path=str(tmp_path / "agent.db"))
+    registry = build_default_registry(config)
+
+    assert [tool.name for tool in registry.list_tools()] == [
+        "calculator",
+        "search",
+        "todo",
+    ]
+    assert {item["function"]["name"] for item in registry.schemas()} == {
+        "calculator",
+        "search",
+        "todo",
+    }

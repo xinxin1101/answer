@@ -9,8 +9,7 @@ from pydantic import ValidationError
 
 from min_agent.tools.base import ToolDefinition, ToolExecutionResult
 
-
-_TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+_TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class ToolNotFoundError(LookupError):

@@ -1,6 +1,8 @@
 """SQLite-backed todo tool with add, list and complete operations."""
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -32,19 +34,30 @@ class TodoArgs(BaseModel):
 
 
 class TodoStore:
-    """Small SQLite repository; each operation uses its own short-lived connection."""
+    """Small SQLite repository with short-lived file connections."""
 
     def __init__(self, database_path: str) -> None:
         self.database_path = database_path
-        if database_path != ":memory:":
+        self._memory_connection = None
+        if database_path == ":memory:":
+            self._memory_connection = sqlite3.connect(":memory:", timeout=5.0)
+        else:
             Path(database_path).parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.database_path, timeout=5.0)
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        if self._memory_connection is not None:
+            with self._memory_connection:
+                yield self._memory_connection
+            return
+
+        with closing(sqlite3.connect(self.database_path, timeout=5.0)) as connection:
+            with connection:
+                yield connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS todos (
@@ -57,7 +70,7 @@ class TodoStore:
             )
 
     def add(self, title: str) -> dict[str, object]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute("INSERT INTO todos (title) VALUES (?)", (title.strip(),))
             row = connection.execute(
                 "SELECT id, title, completed, created_at FROM todos WHERE id = ?",
@@ -66,14 +79,14 @@ class TodoStore:
         return self._serialize(row)
 
     def list(self) -> list[dict[str, object]]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT id, title, completed, created_at FROM todos ORDER BY id DESC"
             ).fetchall()
         return [self._serialize(row) for row in rows]
 
     def complete(self, todo_id: int) -> dict[str, object]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE todos SET completed = 1 WHERE id = ?",
                 (todo_id,),

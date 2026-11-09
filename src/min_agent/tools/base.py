@@ -6,7 +6,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-
 ToolHandler = Callable[[BaseModel], Any | Awaitable[Any]]
 
 
