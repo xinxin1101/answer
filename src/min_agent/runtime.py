@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from min_agent.core.schemas import ChatMessage, LLMResponse
 from min_agent.llm.protocol import LLMProvider
+from min_agent.tools.base import ToolExecutionContext
 from min_agent.tools.registry import ToolRegistry
 from min_agent.trace.recorder import TraceRecorder
 
@@ -67,6 +68,7 @@ class AgentRuntime:
         context_summary: str | None = None,
         trace_id: str | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> AgentRunResult:
         """Run one user request until a final answer or the step limit is reached."""
         if not message.strip():
@@ -78,7 +80,7 @@ class AgentRuntime:
 
         system_content = self.system_prompt
         if context_summary:
-            system_content += "\\n\\n" + context_summary
+            system_content += "\n\n" + context_summary
 
         messages = [
             ChatMessage(role="system", content=system_content),
@@ -151,9 +153,15 @@ class AgentRuntime:
                         status="running",
                         details={"argument_keys": sorted(tool_call.arguments)},
                     )
+                    execution_context = (
+                        ToolExecutionContext(user_id=user_id, session_id=session_id)
+                        if user_id
+                        else None
+                    )
                     result = await self.tool_registry.execute(
                         tool_call.name,
                         tool_call.arguments,
+                        context=execution_context,
                     )
                     duration_ms = self._elapsed_ms(tool_started)
                     self._record(
@@ -169,7 +177,7 @@ class AgentRuntime:
                                 json.dumps(result.output, ensure_ascii=False, default=str)
                             ),
                             "error_type": (
-                                "ToolExecutionError" if not result.success else None
+                                result.error_category if not result.success else None
                             ),
                         },
                     )
