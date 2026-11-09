@@ -206,7 +206,7 @@ def test_file_database_uses_wal_and_foreign_keys(tmp_path) -> None:
     import sqlite3
 
     database_path = str(tmp_path / "sqlite-pragmas.db")
-    SessionStore(database_path)
+    store = SessionStore(database_path)
     connection = sqlite3.connect(database_path)
     journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
     connection.close()
