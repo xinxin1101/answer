@@ -8,11 +8,11 @@
 - [x] 阶段 2：OpenAI 兼容 LLM Provider、响应解析与 Mock 测试
 - [x] 阶段 3：Tool Registry、JSON Schema 参数校验、Calculator / Search / Todo
 - [x] 阶段 4：Agent Loop、工具结果回填、多工具调用与最大步数限制
-- [ ] 阶段 5：SQLite Session、短期历史、长期 Memory 与 Context 压缩
+- [x] 阶段 5：SQLite SessionStore / MessageStore、会话隔离与历史恢复
 - [ ] 阶段 6：Trace、超时、重试边界与异常恢复
 - [ ] 阶段 7：集成测试、演示用例与最终验收
 
-目前已具备可编程调用的 Agent Runtime 核心。对话历史仍由调用方传入和接收，尚未持久化为 Session；HTTP Chat API 也将在后续阶段接入。
+目前已具备 Agent Runtime 核心，并完成 SQLite 会话与消息持久化。SessionStore 支持按 user_id + session_id 隔离、消息恢复和工具调用消息往返序列化。Chat API、Context 压缩和长期 Memory 仍在后续阶段实现。
 
 ## 技术选型
 
@@ -38,12 +38,15 @@
 ├── docs/
 │   ├── ai-development-log.md
 │   ├── agent-loop.md
+│   ├── sessions.md
 │   ├── architecture.md
 │   ├── llm-integration.md
 │   └── tools.md
 ├── src/min_agent/
 │   ├── api/
 │   ├── core/schemas.py
+│   ├── sessions/
+│   │   └── store.py
 │   ├── llm/
 │   │   ├── errors.py
 │   │   ├── openai_compatible.py
@@ -210,4 +213,5 @@ asyncio.run(main())
 - [Agent Loop](docs/agent-loop.md)
 - [LLM 接入](docs/llm-integration.md)
 - [工具注册与执行](docs/tools.md)
+- [Session 与 MessageStore](docs/sessions.md)
 - [AI Prompt 与问题解决记录](docs/ai-development-log.md)

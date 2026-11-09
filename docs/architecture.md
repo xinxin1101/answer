@@ -74,7 +74,7 @@ return max_steps_reply
 
 一个 step 表示一次 LLM 请求。一次响应可以包含多个工具调用；当前按模型返回顺序串行执行，确保带副作用工具的执行次序可预测。工具调用结果使用匹配的 tool_call_id 回填，然后进入下一轮模型请求。
 
-当前 AgentRuntime 支持传入历史消息并返回本轮完整消息序列，但不负责历史持久化。SessionStore 将在下一阶段实现。
+当前 AgentRuntime 支持传入历史消息并返回本轮完整消息序列。阶段 5 已实现 SQLite SessionStore / MessageStore，负责会话创建、消息追加、历史恢复和 user_id + session_id 所有权校验；Runtime 与存储仍保持解耦，由后续 Chat Service 编排。
 
 ## 4. Context 如何构建
 
@@ -112,7 +112,7 @@ Session 表示一个独立聊天窗口。同一用户可以有多个 session：
 
 两者使用不同 session_id。读取历史时必须同时校验用户身份和 session 归属，不能只依赖前端传入的 session_id。
 
-短期记忆存储当前任务的消息历史、摘要、工具调用结果引用和会话状态。建议以 SQLite 的 sessions、messages 表持久化。
+短期记忆存储当前任务的消息历史和工具调用结果。当前已使用 SQLite 的 sessions、messages 表持久化；消息 payload 保留完整 ChatMessage JSON，确保 tool_calls 与 tool result 可以恢复。
 
 ### Long-term Memory（长期记忆）
 

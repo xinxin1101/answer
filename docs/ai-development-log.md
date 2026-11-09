@@ -70,3 +70,17 @@
 - **定位与解决**：根据 GitHub Actions 日志逐步对齐 Ruff 的导入块与空行规则，随后完整执行 Lint 和测试。
 - **验证命令及结果**：GitHub Actions Ruff 检查通过，Pytest 收集 43 项并全部通过。运行记录：https://github.com/xinxin1101/answer/actions/runs/42593722485
 - **遗留事项**：下一阶段实现 SQLite Session、短期历史持久化、长期 Memory 召回和 Context 压缩；随后增加 API 路由、Trace 和异常恢复。
+
+## 2026-11-09 / 阶段 5：SQLite SessionStore 与 MessageStore
+
+- **目标**：实现多聊天窗口隔离、历史消息持久化、重启恢复和会话所有权校验。
+- **输入 Prompt 摘要**：为每个用户的多个窗口建立独立 session；消息通过 user_id + session_id 读写；工具调用消息必须能完整恢复。
+- **修改文件**：sessions/store.py、sessions/__init__.py、test_sessions.py、docs/sessions.md、README.md、docs/architecture.md。
+- **设计决策**：
+  1. sessions 表保存会话元数据，messages 表保存按自增 id 排序的完整 ChatMessage JSON。
+  2. 所有读写操作都同时校验 user_id 和 session_id，防止跨用户读取或修改。
+  3. System Prompt 不持久化，由 Runtime 每次请求注入。
+  4. assistant tool_calls 与 role=tool 结果完整序列化，恢复后保留 tool_call_id 关联。
+  5. SessionStore 与 AgentRuntime 解耦，下一阶段由 Chat Service 负责读取历史、调用 Runtime 并只追加本轮新消息。
+- **测试覆盖**：同一用户多个 Session 隔离、不同用户隔离、服务重启恢复、工具调用/结果往返、system prompt 拒绝持久化、删除会话级联删除、空 user_id 校验。
+- **遗留事项**：接入 Chat Service/API；实现 ContextManager 的消息窗口和摘要压缩；明确 Todo 数据按 user 还是 session 隔离。
