@@ -10,9 +10,10 @@
 - [x] 阶段 4：Agent Loop、工具结果回填、多工具调用与最大步数限制
 - [x] 阶段 5：SQLite SessionStore / MessageStore、会话隔离与历史恢复
 - [x] 阶段 6：ContextManager、自动历史加载、Sliding Window 与基础摘要压缩
+- [x] 阶段 7：SQLite Long-term Memory、规则提取、关键词召回、去重更新与用户隔离
 - [ ] 阶段 7：集成测试、演示用例与最终验收
 
-目前已具备 Agent Runtime 核心，并完成 SQLite 会话与消息持久化。SessionStore 支持按 user_id + session_id 隔离、消息恢复和工具调用消息往返序列化。ChatService 已自动加载 Session 历史并保存本轮消息；ContextManager 提供按完整轮次裁剪和确定性摘要。HTTP Chat API、长期 Memory 与 Trace 仍在后续阶段实现。
+目前已具备 Agent Runtime 核心，并完成 SQLite 会话与消息持久化。SessionStore 支持按 user_id + session_id 隔离、消息恢复和工具调用消息往返序列化。ChatService 已自动加载 Session 历史并保存本轮消息；ContextManager 提供按完整轮次裁剪和确定性摘要。HTTP Chat API 与 Trace 仍在后续阶段实现。长期 Memory 已实现独立 SQLite 存储、规则提取、关键词召回和用户隔离。
 
 ## 技术选型
 
@@ -46,6 +47,7 @@
 │   ├── api/
 │   ├── core/schemas.py
 │   ├── context/manager.py
+│   ├── memory/ (extractor, models, service, store)
 │   ├── chat/service.py
 │   ├── sessions/
 │   │   └── store.py
@@ -217,4 +219,5 @@ asyncio.run(main())
 - [工具注册与执行](docs/tools.md)
 - [Session 与 MessageStore](docs/sessions.md)
 - [ContextManager](docs/context-manager.md)
+- [Long-term Memory](docs/long-term-memory.md)
 - [AI Prompt 与问题解决记录](docs/ai-development-log.md)
