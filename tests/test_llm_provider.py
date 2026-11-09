@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from min_agent.config import Settings
-from min_agent.core.schemas import ChatMessage
+from min_agent.core.schemas import ChatMessage, ToolCall
 from min_agent.llm.errors import LLMProviderError
 from min_agent.llm.openai_compatible import OpenAICompatibleProvider
 
@@ -143,8 +143,6 @@ async def test_provider_serializes_assistant_tool_call_and_tool_result_messages(
                 ]
             },
         )
-
-    from min_agent.core.schemas import ToolCall
 
     messages = [
         ChatMessage(role="user", content="Calculate 1 + 2."),
