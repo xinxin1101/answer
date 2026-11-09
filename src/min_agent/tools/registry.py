@@ -7,7 +7,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from min_agent.tools.base import ToolDefinition, ToolExecutionResult
+from min_agent.tools.base import (
+    ToolDefinition,
+    ToolExecutionContext,
+    ToolExecutionResult,
+)
 
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
@@ -17,17 +21,12 @@ class ToolNotFoundError(LookupError):
 
 
 class ToolRegistry:
-    """In-memory registry owned by an Agent Runtime instance.
-
-    The registry never evaluates model-generated code. It validates arguments
-    against each tool's Pydantic model before invoking the registered handler.
-    """
+    """In-memory registry with schema validation and explicit trusted context."""
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
 
     def register(self, tool: ToolDefinition) -> None:
-        """Register one tool and reject invalid or duplicate names."""
         if not _TOOL_NAME_PATTERN.fullmatch(tool.name):
             raise ValueError("Tool name must use lowercase letters, digits and underscores.")
         if tool.name in self._tools:
@@ -37,18 +36,15 @@ class ToolRegistry:
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> ToolDefinition:
-        """Return a registered tool definition."""
         try:
             return self._tools[name]
         except KeyError as exc:
             raise ToolNotFoundError(f"Tool '{name}' is not registered.") from exc
 
     def list_tools(self) -> list[ToolDefinition]:
-        """Return registered tools in registration order."""
         return list(self._tools.values())
 
     def schemas(self) -> list[dict[str, Any]]:
-        """Return OpenAI-compatible function schemas for model tool selection."""
         return [
             {
                 "type": "function",
@@ -61,8 +57,14 @@ class ToolRegistry:
             for tool in self._tools.values()
         ]
 
-    async def execute(self, name: str, arguments: dict[str, Any]) -> ToolExecutionResult:
-        """Validate and execute a tool, returning failures as structured results."""
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        context: ToolExecutionContext | None = None,
+    ) -> ToolExecutionResult:
+        """Validate model arguments, then execute with trusted runtime context."""
         try:
             tool = self.get(name)
         except ToolNotFoundError:
@@ -70,6 +72,7 @@ class ToolRegistry:
                 tool_name=name,
                 success=False,
                 error=f"Unknown tool: {name}",
+                error_category="not_found",
             )
 
         try:
@@ -83,10 +86,22 @@ class ToolRegistry:
                 tool_name=name,
                 success=False,
                 error=f"Invalid arguments: {details}",
+                error_category="validation",
+            )
+
+        if tool.context_aware and (context is None or not context.user_id.strip()):
+            return ToolExecutionResult(
+                tool_name=name,
+                success=False,
+                error="Trusted user context is required for this tool.",
+                error_category="authorization",
             )
 
         try:
-            result = tool.handler(validated_args)
+            if tool.context_aware:
+                result = tool.handler(validated_args, context)
+            else:
+                result = tool.handler(validated_args)
             if inspect.isawaitable(result):
                 result = await asyncio.wait_for(result, timeout=tool.timeout_seconds)
             return ToolExecutionResult(tool_name=name, success=True, output=result)
@@ -95,10 +110,12 @@ class ToolRegistry:
                 tool_name=name,
                 success=False,
                 error=f"Tool '{name}' timed out.",
+                error_category="timeout",
             )
         except Exception as exc:
             return ToolExecutionResult(
                 tool_name=name,
                 success=False,
                 error=f"Tool '{name}' failed ({type(exc).__name__}).",
+                error_category="tool_execution",
             )
