@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     max_context_messages: int = Field(default=20, ge=2, le=500)
     database_path: str = "./data/agent.db"
 
+    jwt_secret: str = Field(
+        default="dev-only-insecure-secret-change-before-deploy-000000000000",
+        min_length=32,
+        repr=False,
+    )
+    jwt_issuer: str = "minimal-agent-runtime"
+    jwt_audience: str = "minimal-agent-api"
+    trace_retention_days: int = Field(default=30, ge=1, le=3650)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
