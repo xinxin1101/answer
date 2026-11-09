@@ -6,6 +6,7 @@ from min_agent.context.manager import ContextManager
 from min_agent.core.schemas import ChatMessage
 from min_agent.runtime import AgentRuntime
 from min_agent.sessions.store import SessionStore
+from min_agent.memory.service import MemoryService
 
 
 class ChatResult(BaseModel):
@@ -27,10 +28,12 @@ class ChatService:
         runtime: AgentRuntime,
         session_store: SessionStore,
         context_manager: ContextManager,
+        memory_service: MemoryService | None = None,
     ) -> None:
         self.runtime = runtime
         self.session_store = session_store
         self.context_manager = context_manager
+        self.memory_service = memory_service
 
     async def chat(
         self, user_id: str, message: str, session_id: str | None = None
@@ -46,15 +49,18 @@ class ChatService:
             history = self.session_store.get_messages(user_id, session_id)
 
         window = self.context_manager.build(history)
+        memory_context = self.memory_service.retrieve_context(user_id, message) if self.memory_service else None
         result = await self.runtime.run(
             message,
             history=window.history,
-            context_summary=window.summary,
+            context_summary="\\n\\n".join(part for part in (window.summary, memory_context) if part) or None,
         )
         # messages = system + selected history + this turn; persist only this turn.
         start = 1 + len(window.history)
         new_messages = [item for item in result.messages[start:] if item.role != "system"]
         self.session_store.append_messages(user_id, session_id, new_messages)
+        if self.memory_service:
+            self.memory_service.remember_from_user_message(user_id, message)
         return ChatResult(
             session_id=session_id,
             reply=result.reply,
