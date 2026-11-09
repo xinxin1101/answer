@@ -1,13 +1,19 @@
-"""Health, chat, session and trace HTTP endpoints."""
+"""Health, authenticated chat, session and trace HTTP endpoints."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from min_agent.api.schemas import ChatRequest
+from min_agent.auth import get_current_user_id
 from min_agent.chat.service import ChatService
 from min_agent.llm.errors import LLMProviderError
-from min_agent.sessions.store import SessionNotFoundError
+from min_agent.sessions.store import (
+    IdempotencyConflictError,
+    IdempotencyInProgressError,
+    SessionBusyError,
+    SessionNotFoundError,
+)
 from min_agent.trace.recorder import TraceRecorder
 
 router = APIRouter()
@@ -29,16 +35,6 @@ def get_trace_recorder(request: Request) -> TraceRecorder:
     return recorder
 
 
-def require_user_id(
-    x_user_id: Annotated[str, Header(alias="X-User-ID", min_length=1)],
-) -> str:
-    """Demo identity boundary; production should derive this from authentication."""
-    user_id = x_user_id.strip()
-    if not user_id:
-        raise HTTPException(status_code=401, detail="X-User-ID header is required.")
-    return user_id
-
-
 @router.get("/health", tags=["system"], summary="Health check")
 async def health_check() -> dict[str, str]:
     """Return a lightweight process health status."""
@@ -48,19 +44,38 @@ async def health_check() -> dict[str, str]:
 @router.post("/chat", tags=["chat"], summary="Send a message to the Agent")
 async def chat(
     payload: ChatRequest,
-    user_id: Annotated[str, Depends(require_user_id)],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     service: Annotated[ChatService, Depends(get_chat_service)],
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key", max_length=128),
+    ] = None,
 ) -> dict[str, object]:
-    """Create a session or continue the caller's existing session."""
+    """Create or continue a session; optionally deduplicate a client retry."""
     try:
         result = await service.chat(
             user_id=user_id,
             message=payload.message,
             session_id=payload.session_id,
+            idempotency_key=idempotency_key,
         )
         return result.model_dump()
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Session not found.") from exc
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IdempotencyInProgressError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"Retry-After": "1"},
+        ) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"Retry-After": "2"},
+        ) from exc
     except LLMProviderError as exc:
         raise HTTPException(
             status_code=502,
@@ -72,10 +87,10 @@ async def chat(
 
 @router.get("/sessions", tags=["sessions"], summary="List the user's sessions")
 async def list_sessions(
-    user_id: Annotated[str, Depends(require_user_id)],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> list[dict[str, object]]:
-    """List sessions owned by the caller."""
+    """List sessions owned by the authenticated caller."""
     return [item.model_dump() for item in service.session_store.list_sessions(user_id)]
 
 
@@ -86,7 +101,7 @@ async def list_sessions(
 )
 async def get_session_messages(
     session_id: str,
-    user_id: Annotated[str, Depends(require_user_id)],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> list[dict[str, object]]:
     """Read a session's history after checking ownership."""
@@ -104,10 +119,10 @@ async def get_session_messages(
 )
 async def delete_session(
     session_id: str,
-    user_id: Annotated[str, Depends(require_user_id)],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> dict[str, str]:
-    """Delete only a session owned by the caller."""
+    """Delete only a session owned by the authenticated caller."""
     try:
         service.session_store.delete_session(user_id, session_id)
     except SessionNotFoundError as exc:
@@ -117,12 +132,13 @@ async def delete_session(
 
 @router.get("/traces", tags=["traces"], summary="List recent execution traces")
 async def list_traces(
-    user_id: Annotated[str, Depends(require_user_id)],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     recorder: Annotated[TraceRecorder, Depends(get_trace_recorder)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    before_started_at: Annotated[str | None, Query(max_length=64)] = None,
 ) -> list[dict[str, object]]:
-    """List recent traces owned by the caller."""
-    return recorder.list_traces(user_id, limit)
+    """List a page of traces owned by the authenticated caller."""
+    return recorder.list_traces(user_id, limit, before_started_at)
 
 
 @router.get(
@@ -132,11 +148,18 @@ async def list_traces(
 )
 async def get_trace(
     trace_id: str,
-    user_id: Annotated[str, Depends(require_user_id)],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     recorder: Annotated[TraceRecorder, Depends(get_trace_recorder)],
+    event_limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    after_event_id: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, object]:
-    """Read trace metadata and ordered execution events."""
-    trace = recorder.get_trace(user_id, trace_id)
+    """Read trace metadata and one page of ordered events."""
+    trace = recorder.get_trace(
+        user_id,
+        trace_id,
+        event_limit=event_limit,
+        after_event_id=after_event_id,
+    )
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found.")
     return trace
