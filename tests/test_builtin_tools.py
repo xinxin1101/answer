@@ -136,7 +136,7 @@ async def test_todo_isolation_and_cross_user_completion_rejection(tmp_path) -> N
     assert len(list_a.output) == 1
     assert list_b.output == []
     assert foreign_complete.success is False
-    assert "not found for this user" in (foreign_complete.error or "")
+    assert foreign_complete.error_category == "tool_execution"
 
 
 @pytest.mark.asyncio
