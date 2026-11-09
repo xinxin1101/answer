@@ -3,7 +3,6 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
-from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
