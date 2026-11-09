@@ -8,6 +8,8 @@ from min_agent.context.manager import ContextManager
 from min_agent.core.schemas import ChatMessage, LLMResponse, ToolCall
 from min_agent.runtime import AgentRuntime
 from min_agent.sessions.store import SessionNotFoundError, SessionStore
+from min_agent.memory.service import MemoryService
+from min_agent.memory.store import MemoryStore
 from min_agent.tools.base import ToolDefinition
 from min_agent.tools.calculator import CalculatorArgs
 from min_agent.tools.registry import ToolRegistry
@@ -82,3 +84,35 @@ async def test_chat_service_rejects_foreign_session(tmp_path) -> None:
     )
     with pytest.raises(SessionNotFoundError):
         await service.chat("user-b", "Try to read it", session.session_id)
+
+
+@pytest.mark.asyncio
+async def test_long_term_memory_is_recalled_across_sessions(tmp_path) -> None:
+    provider = FakeProvider([
+        LLMResponse(content="已记录你的技术偏好。"),
+        LLMResponse(content="你偏好使用 FastAPI。"),
+    ])
+    database_path = str(tmp_path / "chat.db")
+    memory_service = MemoryService(MemoryStore(database_path))
+    service = ChatService(
+        AgentRuntime(provider, ToolRegistry()),
+        SessionStore(database_path),
+        ContextManager(max_messages=10),
+        memory_service=memory_service,
+    )
+
+    first = await service.chat(
+        "user-a",
+        "以后我所有后端项目都优先使用 FastAPI。",
+    )
+    second = await service.chat(
+        "user-a",
+        "FastAPI",
+    )
+
+    assert first.session_id != second.session_id
+    assert second.memory_used is True
+    assert any(
+        "FastAPI" in (message.content or "")
+        for message in provider.requests[1]
+    )
