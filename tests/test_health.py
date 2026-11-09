@@ -2,7 +2,6 @@ from fastapi.testclient import TestClient
 
 from min_agent.main import app
 
-
 client = TestClient(app)
 
 
