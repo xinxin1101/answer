@@ -7,13 +7,12 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from threading import RLock
 
-from min_agent.storage.sqlite import connect_sqlite, enable_wal, prepare_database_path
-
 from min_agent.memory.models import (
     MemoryCandidate,
     MemoryItem,
     MemorySearchResult,
 )
+from min_agent.storage.sqlite import connect_sqlite, enable_wal, prepare_database_path
 
 
 class MemoryStore:
