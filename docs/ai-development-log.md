@@ -84,3 +84,12 @@
   5. SessionStore 与 AgentRuntime 解耦，下一阶段由 Chat Service 负责读取历史、调用 Runtime 并只追加本轮新消息。
 - **测试覆盖**：同一用户多个 Session 隔离、不同用户隔离、服务重启恢复、工具调用/结果往返、system prompt 拒绝持久化、删除会话级联删除、空 user_id 校验。
 - **遗留事项**：接入 Chat Service/API；实现 ContextManager 的消息窗口和摘要压缩；明确 Todo 数据按 user 还是 session 隔离。
+
+## 2026-11-09 / 阶段 6：ContextManager 与 ChatService
+
+- **目标**：自动加载 Session 历史、支持连续追问、控制上下文长度，并对旧轮次进行基础压缩。
+- **输入 Prompt 摘要**：实现 ContextManager、Sliding Window、摘要压缩；工具调用与结果必须作为完整单元保留；调用方不再手动传 history。
+- **修改文件**：context/manager.py、chat/service.py、runtime.py、test_context_manager.py、test_chat_service.py、docs/context-manager.md、README.md。
+- **设计决策**：原始历史完整保存在 SQLite；按完整用户轮次裁剪；工具调用及结果不拆分；使用确定性抽取式摘要；Runtime 接收 context_summary；ChatService 只保存本轮新消息。
+- **测试覆盖**：历史裁剪和摘要、工具调用轮次完整性、空历史、连续追问、工具结果追问、跨用户 Session 拒绝访问。
+- **遗留事项**：HTTP Chat API、长期 Memory、TraceRecorder、Token 预算控制和摘要质量增强。

@@ -65,6 +65,7 @@ class AgentRuntime:
         message: str,
         *,
         history: Sequence[ChatMessage] | None = None,
+        context_summary: str | None = None,
     ) -> AgentRunResult:
         """Run one user request until a final answer or the step limit is reached.
 
@@ -78,8 +79,12 @@ class AgentRuntime:
         if any(item.role == "system" for item in prior_messages):
             raise ValueError("history must not contain system messages")
 
+        system_content = self.system_prompt
+        if context_summary:
+            system_content += "\\n\\n" + context_summary
+
         messages = [
-            ChatMessage(role="system", content=self.system_prompt),
+            ChatMessage(role="system", content=system_content),
             *prior_messages,
             ChatMessage(role="user", content=message),
         ]
