@@ -1,15 +1,20 @@
-"""SQLite-backed session and message persistence."""
+"""SQLite-backed session, message, idempotency and concurrency persistence."""
 
+import asyncio
+import json
 import sqlite3
+import time
 import uuid
-from collections.abc import Iterator, Sequence
-from contextlib import closing, contextmanager
+from collections.abc import AsyncIterator, Iterator, Sequence
+from contextlib import asynccontextmanager, closing, contextmanager
 from pathlib import Path
+from threading import RLock
 from typing import Literal
 
 from pydantic import BaseModel
 
 from min_agent.core.schemas import ChatMessage
+from min_agent.storage.sqlite import connect_sqlite, enable_wal, prepare_database_path
 
 PersistedRole = Literal["user", "assistant", "tool"]
 
@@ -22,6 +27,18 @@ class SessionStoreError(RuntimeError):
     """Raised when stored session data cannot be decoded safely."""
 
 
+class SessionBusyError(RuntimeError):
+    """Raised when another request holds a session lock for too long."""
+
+
+class IdempotencyConflictError(ValueError):
+    """Raised when one idempotency key is reused with a different request body."""
+
+
+class IdempotencyInProgressError(RuntimeError):
+    """Raised when an identical idempotent request is still being processed."""
+
+
 class SessionInfo(BaseModel):
     session_id: str
     user_id: str
@@ -31,28 +48,25 @@ class SessionInfo(BaseModel):
 
 
 class SessionStore:
-    """Own session lifecycle and ordered message history in SQLite."""
+    """Own session lifecycle, ordered history and cross-process request coordination."""
 
     def __init__(self, database_path: str) -> None:
         self.database_path = database_path
-        self._memory_connection: sqlite3.Connection | None = None
-        if database_path == ":memory:":
-            self._memory_connection = sqlite3.connect(":memory:", timeout=5.0)
-        else:
-            Path(database_path).parent.mkdir(parents=True, exist_ok=True)
+        prepare_database_path(database_path)
+        self._memory_connection = (
+            connect_sqlite(":memory:") if database_path == ":memory:" else None
+        )
+        self._memory_lock = RLock()
+        enable_wal(database_path)
         self._initialize()
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         if self._memory_connection is not None:
-            self._memory_connection.row_factory = sqlite3.Row
-            self._memory_connection.execute("PRAGMA foreign_keys = ON")
-            with self._memory_connection:
+            with self._memory_lock, self._memory_connection:
                 yield self._memory_connection
             return
-        with closing(sqlite3.connect(self.database_path, timeout=5.0)) as connection:
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys = ON")
+        with closing(connect_sqlite(self.database_path)) as connection:
             with connection:
                 yield connection
 
@@ -80,6 +94,22 @@ class SessionStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_session_id
                     ON messages(session_id, id ASC);
+                CREATE TABLE IF NOT EXISTS session_locks (
+                    session_id TEXT PRIMARY KEY,
+                    owner_token TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES sessions(session_id)
+                        ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS idempotency_requests (
+                    user_id TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    request_hash TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending', 'completed')),
+                    response_json TEXT,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY(user_id, idempotency_key)
+                );
                 """
             )
 
@@ -120,10 +150,7 @@ class SessionStore:
         owner = self._validate_user_id(user_id)
         with self._connection() as connection:
             row = connection.execute(
-                """
-                SELECT * FROM sessions
-                WHERE session_id = ? AND user_id = ?
-                """,
+                "SELECT * FROM sessions WHERE session_id = ? AND user_id = ?",
                 (session_id, owner),
             ).fetchone()
         if row is None:
@@ -201,3 +228,150 @@ class SessionStore:
             )
             if cursor.rowcount == 0:
                 raise SessionNotFoundError("Session was not found for this user.")
+
+    @asynccontextmanager
+    async def session_lock(
+        self,
+        user_id: str,
+        session_id: str,
+        *,
+        wait_timeout_seconds: float = 30.0,
+        lease_seconds: float = 900.0,
+    ) -> AsyncIterator[None]:
+        """Acquire a SQLite lease so one session is processed by one worker at a time."""
+        owner = self._validate_user_id(user_id)
+        self.get_session(owner, session_id)
+        token = str(uuid.uuid4())
+        deadline = time.monotonic() + wait_timeout_seconds
+
+        while True:
+            now = time.time()
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    """
+                    INSERT INTO session_locks (session_id, owner_token, expires_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        owner_token = excluded.owner_token,
+                        expires_at = excluded.expires_at
+                    WHERE session_locks.expires_at < ?
+                    """,
+                    (session_id, token, now + lease_seconds, now),
+                )
+                row = connection.execute(
+                    "SELECT owner_token FROM session_locks WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                acquired = row is not None and row["owner_token"] == token
+
+            if acquired:
+                break
+            if time.monotonic() >= deadline:
+                raise SessionBusyError("Session is busy; retry the request shortly.")
+            await asyncio.sleep(0.05)
+
+        try:
+            yield
+        finally:
+            with self._connection() as connection:
+                connection.execute(
+                    "DELETE FROM session_locks WHERE session_id = ? AND owner_token = ?",
+                    (session_id, token),
+                )
+
+    def claim_idempotency_request(
+        self,
+        user_id: str,
+        idempotency_key: str,
+        request_hash: str,
+        *,
+        lease_seconds: float = 900.0,
+    ) -> dict[str, object] | None:
+        """Claim a request key, return a completed response, or reject a duplicate."""
+        owner = self._validate_user_id(user_id)
+        key = idempotency_key.strip()
+        if not key or len(key) > 128:
+            raise ValueError("Idempotency-Key must contain 1 to 128 characters.")
+        now = time.time()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT request_hash, status, response_json, updated_at
+                FROM idempotency_requests
+                WHERE user_id = ? AND idempotency_key = ?
+                """,
+                (owner, key),
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    """
+                    INSERT INTO idempotency_requests (
+                        user_id, idempotency_key, request_hash, status, updated_at
+                    ) VALUES (?, ?, ?, 'pending', ?)
+                    """,
+                    (owner, key, request_hash, now),
+                )
+                return None
+            if row["request_hash"] != request_hash:
+                raise IdempotencyConflictError(
+                    "This Idempotency-Key was already used with a different request."
+                )
+            if row["status"] == "completed" and row["response_json"]:
+                return json.loads(row["response_json"])
+            if now - row["updated_at"] > lease_seconds:
+                connection.execute(
+                    """
+                    UPDATE idempotency_requests
+                    SET status = 'pending', response_json = NULL, updated_at = ?
+                    WHERE user_id = ? AND idempotency_key = ?
+                    """,
+                    (now, owner, key),
+                )
+                return None
+            raise IdempotencyInProgressError(
+                "A request with this Idempotency-Key is still running."
+            )
+
+    def complete_idempotency_request(
+        self,
+        user_id: str,
+        idempotency_key: str,
+        response: dict[str, object],
+    ) -> None:
+        owner = self._validate_user_id(user_id)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                UPDATE idempotency_requests
+                SET status = 'completed', response_json = ?, updated_at = ?
+                WHERE user_id = ? AND idempotency_key = ?
+                """,
+                (
+                    json.dumps(response, ensure_ascii=False),
+                    time.time(),
+                    owner,
+                    idempotency_key,
+                ),
+            )
+
+    def release_idempotency_request(self, user_id: str, idempotency_key: str) -> None:
+        owner = self._validate_user_id(user_id)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                DELETE FROM idempotency_requests
+                WHERE user_id = ? AND idempotency_key = ? AND status = 'pending'
+                """,
+                (owner, idempotency_key),
+            )
+
+    def prune_idempotency_requests(self, older_than_seconds: int = 86_400) -> int:
+        cutoff = time.time() - older_than_seconds
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "DELETE FROM idempotency_requests WHERE updated_at < ?",
+                (cutoff,),
+            )
+            return cursor.rowcount
