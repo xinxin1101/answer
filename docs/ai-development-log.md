@@ -121,3 +121,24 @@
 - **测试覆盖**：Trace 成功与失败生命周期、耗时和事件顺序、敏感字段过滤、跨用户 Trace 隔离、Chat API 创建会话并返回 trace_id、Trace API 查询、Session 与 Trace 越权读取拒绝、缺失身份头校验。
 - **验证命令及结果**：GitHub Actions 的 Ruff 与 Pytest 全部通过，69 项测试通过。运行记录：https://github.com/xinxin1101/answer/actions/runs/42614507642
 - **遗留事项**：更完善的认证接入、Trace 分页/保留策略、异步批量写入、并发压测和端到端真实模型演示。
+
+
+## 2026-11-09 / 阶段 9：工程化完善与最终验收
+
+- **目标**：检查并加固 Todo 租户隔离、JWT 身份认证、SQLite 并发安全、请求幂等和 Trace 运维能力，补充 Mock LLM 端到端验收。
+- **审计发现**：仓库已有部分阶段 9 实现，但 README / 旧 API 文档仍保留 X-User-ID 的过时说明；CI 中存在 Ruff 导入问题、未定义测试变量，以及测试断言与安全错误脱敏策略不一致。
+- **实现确认**：
+  1. TodoStore 以 user_id 作为每次读写条件，模型不能传入 user_id；旧表迁移数据归入未分配租户，避免泄露给新用户。
+  2. API 通过 PyJWT 验证 Bearer Token 的 HS256 签名、issuer、audience、exp 和 sub；生产环境拒绝默认开发密钥。
+  3. SQLite 统一启用 WAL、busy_timeout、foreign_keys；SessionStore 提供数据库租约锁。
+  4. ChatService 支持按 user_id 作用域的 Idempotency-Key，处理请求哈希冲突、处理中重放和完成结果缓存。
+  5. TraceRecorder 支持事件游标分页、Trace 列表翻页、保留期清理和异常分类。
+- **本阶段新增**：tests/test_end_to_end.py 覆盖多工具调用、跨 Session Memory、Context 压缩、Todo 租户隔离、Trace 成功轨迹和超时异常轨迹；docs/engineering-hardening.md 记录设计、运行方式和部署边界。
+- **问题定位与修复**：
+  - CI Ruff 检查发现多个文件 import 排序 / 空行问题，逐一修复。
+  - 原 Session 测试使用未定义变量 store，修复为保留 SessionStore 实例。
+  - Todo 跨用户完成测试改为断言稳定的错误分类，不依赖对外暴露内部 ValueError 文本。
+  - E2E Memory 召回测试调整为包含可匹配关键词的查询。
+  - Trace 超时测试确保 AgentRuntime 和 ChatService 注入同一个 TraceRecorder，验证 llm.failed 与 runtime.failed 事件。
+- **验证命令及结果**：GitHub Actions Ruff 检查通过；Pytest 87 项全部通过。运行记录：https://github.com/xinxin1101/answer/actions/runs/42635895504
+- **验收边界**：当前为单机 SQLite + JWT 验证的工程化 Demo；正式部署仍需身份签发服务、Secret Manager、长任务锁续租、PostgreSQL / Redis、多实例压测和真实模型演示。
