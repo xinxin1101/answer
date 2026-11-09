@@ -51,5 +51,5 @@
   5. Todo 使用 SQLite 参数化查询，支持 add / list / complete。
 - **遇到的问题**：首次 CI 因 Ruff I001 和 E501 未通过；修复后发现一次 Git Tree 更新没有保留上一阶段的 LLM 文件。
 - **定位与解决**：根据 Actions 日志修复导入排序和超长行；通过递归检查 Git Tree 发现 LLM 文件缺失，再从阶段 2 的提交恢复，并将阶段 2 和阶段 3 文件放入同一完整仓库树。
-- **验证命令及结果**：代码修复后 Ruff 通过；首次测试收集为 22 项通过，但该次提交未包含阶段 2 的测试文件，因此不能作为完整集成验收。恢复文件后的完整 CI 结果待本次提交完成后更新。
+- **验证命令及结果**：恢复阶段 2 的 LLM Provider、解析器、集成文档和测试后，GitHub Actions 完整执行 Ruff 与 Pytest，31 项测试全部通过。运行记录：https://github.com/xinxin1101/answer/actions/runs/42590669474
 - **遗留事项**：实现 Agent Loop，将 LLMProvider、ToolRegistry 和 ChatMessage/ToolCall 连接起来。
