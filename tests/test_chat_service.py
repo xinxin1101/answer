@@ -116,3 +116,62 @@ async def test_long_term_memory_is_recalled_across_sessions(tmp_path) -> None:
         "FastAPI" in (message.content or "")
         for message in provider.requests[1]
     )
+
+
+@pytest.mark.asyncio
+async def test_same_session_requests_are_serialized(tmp_path) -> None:
+    import asyncio
+
+    class SlowProvider(FakeProvider):
+        async def complete(self, messages, tools=None):
+            await asyncio.sleep(0.02)
+            return await super().complete(messages, tools)
+
+    provider = SlowProvider([
+        LLMResponse(content="first answer"),
+        LLMResponse(content="second answer"),
+    ])
+    store = SessionStore(str(tmp_path / "concurrent.db"))
+    session = store.create_session("user-a")
+    service = ChatService(
+        AgentRuntime(provider, ToolRegistry()),
+        store,
+        ContextManager(max_messages=10),
+    )
+
+    await asyncio.gather(
+        service.chat("user-a", "first question", session.session_id),
+        service.chat("user-a", "second question", session.session_id),
+    )
+
+    second_request = provider.requests[1]
+    contents = [item.content for item in second_request]
+    assert "first question" in contents
+    assert "first answer" in contents
+    assert contents[-1] == "second question"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_replays_idempotent_response_without_second_llm_call(
+    tmp_path,
+) -> None:
+    provider = FakeProvider([LLMResponse(content="Processed exactly once.")])
+    service = ChatService(
+        AgentRuntime(provider, ToolRegistry()),
+        SessionStore(str(tmp_path / "idempotent-chat.db")),
+        ContextManager(max_messages=10),
+    )
+
+    first = await service.chat(
+        "user-a",
+        "Run this once",
+        idempotency_key="client-retry-123",
+    )
+    replay = await service.chat(
+        "user-a",
+        "Run this once",
+        idempotency_key="client-retry-123",
+    )
+
+    assert first == replay
+    assert len(provider.requests) == 1
