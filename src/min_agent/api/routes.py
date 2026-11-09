@@ -1,5 +1,7 @@
 """Health, chat, session and trace HTTP endpoints."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from min_agent.api.schemas import ChatRequest
@@ -27,7 +29,7 @@ def get_trace_recorder(request: Request) -> TraceRecorder:
     return recorder
 
 
-def require_user_id(x_user_id: str = Header(alias="X-User-ID", min_length=1)) -> str:
+def require_user_id(\n    x_user_id: Annotated[str, Header(alias="X-User-ID", min_length=1)],\n) -> str:
     """Demo identity boundary; production should derive this from authentication."""
     user_id = x_user_id.strip()
     if not user_id:
@@ -47,8 +49,8 @@ async def health_check() -> dict[str, str]:
 @router.post("/chat", tags=["chat"], summary="Send a message to the Agent")
 async def chat(
     payload: ChatRequest,
-    user_id: str = Depends(require_user_id),
-    service: ChatService = Depends(get_chat_service),
+    user_id: Annotated[str, Depends(require_user_id)],
+    service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> dict[str, object]:
     """Create a session or continue the caller's existing session."""
     try:
@@ -119,9 +121,9 @@ async def delete_session(
 
 @router.get("/traces", tags=["traces"], summary="List recent execution traces")
 async def list_traces(
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
     user_id: str = Depends(require_user_id),
-    recorder: TraceRecorder = Depends(get_trace_recorder),
+    recorder: Annotated[TraceRecorder, Depends(get_trace_recorder)],
 ) -> list[dict[str, object]]:
     """List recent traces owned by the caller."""
     return recorder.list_traces(user_id, limit)
