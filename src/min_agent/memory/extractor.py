@@ -19,6 +19,8 @@ class MemoryExtractor:
         text = " ".join(user_message.split()).strip()
         if not text or len(text) > 1000:
             return []
+        if re.search(r"(?:不要记住|别记住|不要保存|删除记忆)", text):
+            return []
 
         found: dict[str, MemoryCandidate] = {}
         for pattern, category in _RULES:
@@ -27,8 +29,7 @@ class MemoryExtractor:
                 continue
 
             content = match.group().strip(" ，。；;")
-            normalized = re.sub(r"[^\w\u4e00-\u9fff]+", "_", content.lower())
-            memory_key = f"{category}:{normalized[:100]}"
+            memory_key = self._memory_key(content, category)
             found[memory_key] = MemoryCandidate(
                 memory_key=memory_key,
                 content=content,
@@ -36,3 +37,17 @@ class MemoryExtractor:
             )
 
         return list(found.values())
+
+    @staticmethod
+    def _memory_key(content: str, category: str) -> str:
+        """Group statements about the same preference slot to support updates."""
+        if category == "preference":
+            if "后端" in content and ("项目" in content or "开发" in content):
+                return "preference:backend_stack"
+            if "回复" in content or "回答" in content:
+                return "preference:response_style"
+            if "语言" in content:
+                return "preference:language"
+
+        normalized = re.sub(r"[^\w\u4e00-\u9fff]+", "_", content.lower())
+        return f"{category}:{normalized[:100]}"
