@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from min_agent.chat.service import ChatService
+from min_agent.config import Settings
 from min_agent.context.manager import ContextManager
 from min_agent.core.schemas import ChatMessage, LLMResponse, ToolCall
 from min_agent.memory.service import MemoryService
@@ -14,7 +15,6 @@ from min_agent.runtime import AgentRuntime
 from min_agent.sessions.store import SessionStore
 from min_agent.tools.defaults import build_default_registry
 from min_agent.tools.todo import TodoStore
-from min_agent.config import Settings
 from min_agent.trace.recorder import TraceRecorder
 
 
@@ -144,7 +144,10 @@ async def test_end_to_end_timeout_is_classified_and_trace_is_retained(tmp_path) 
     trace_recorder = TraceRecorder(database_path)
     session_store = SessionStore(database_path)
     service = ChatService(
-        AgentRuntime(TimeoutProvider(), build_default_registry(Settings(database_path=database_path))),
+        AgentRuntime(
+            TimeoutProvider(),
+            build_default_registry(Settings(database_path=database_path)),
+        ),
         session_store,
         ContextManager(max_messages=4),
         trace_recorder=trace_recorder,
