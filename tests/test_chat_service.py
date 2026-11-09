@@ -7,9 +7,9 @@ from min_agent.chat.service import ChatService
 from min_agent.context.manager import ContextManager
 from min_agent.core.schemas import ChatMessage, LLMResponse, ToolCall
 from min_agent.runtime import AgentRuntime
-from min_agent.sessions.store import SessionNotFoundError, SessionStore
 from min_agent.memory.service import MemoryService
 from min_agent.memory.store import MemoryStore
+from min_agent.sessions.store import SessionNotFoundError, SessionStore
 from min_agent.tools.base import ToolDefinition
 from min_agent.tools.calculator import CalculatorArgs
 from min_agent.tools.registry import ToolRegistry
