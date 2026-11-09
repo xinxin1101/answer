@@ -6,7 +6,6 @@ import uuid
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 from threading import RLock
 from typing import Any
 
