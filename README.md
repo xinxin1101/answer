@@ -11,9 +11,9 @@
 - [x] 阶段 5：SQLite SessionStore / MessageStore、会话隔离与历史恢复
 - [x] 阶段 6：ContextManager、自动历史加载、Sliding Window 与基础摘要压缩
 - [x] 阶段 7：SQLite Long-term Memory、规则提取、关键词召回、去重更新与用户隔离
-- [ ] 阶段 8：TraceRecorder、Chat HTTP API 与最终验收
+- [x] 阶段 8：SQLite TraceRecorder、Chat HTTP API、Session API 与 Trace 查询 API
 
-目前已具备 Agent Runtime 核心，并完成 SQLite 会话与消息持久化。SessionStore 支持按 user_id + session_id 隔离、消息恢复和工具调用消息往返序列化。ChatService 已自动加载 Session 历史并保存本轮消息；ContextManager 提供按完整轮次裁剪和确定性摘要。HTTP Chat API 与 Trace 仍在后续阶段实现。长期 Memory 已实现独立 SQLite 存储、规则提取、关键词召回、去重更新和用户隔离；ChatService 可在请求前召回并在回答后提取。
+目前已具备 Agent Runtime 核心，并完成 SQLite 会话与消息持久化。SessionStore 支持按 user_id + session_id 隔离、消息恢复和工具调用消息往返序列化。ChatService 已自动加载 Session 历史并保存本轮消息；ContextManager 提供按完整轮次裁剪和确定性摘要。Chat HTTP API、Session API 和 Trace 查询 API 已接入；TraceRecorder 记录模型调用、工具执行、耗时、状态及异常类型。长期 Memory 已实现独立 SQLite 存储、规则提取、关键词召回、去重更新和用户隔离；ChatService 可在请求前召回并在回答后提取。
 
 ## 技术选型
 
@@ -45,9 +45,12 @@
 │   └── tools.md
 ├── src/min_agent/
 │   ├── api/
+│   │   ├── routes.py
+│   │   └── schemas.py
 │   ├── core/schemas.py
 │   ├── context/manager.py
 │   ├── memory/ (extractor, models, service, store)
+│   ├── trace/ (recorder)
 │   ├── chat/service.py
 │   ├── sessions/
 │   │   └── store.py
@@ -71,13 +74,33 @@
 │   ├── test_health.py
 │   ├── test_llm_parser.py
 │   ├── test_llm_provider.py
-│   ├── test_memory.py\n│   ├── test_runtime.py
+│   ├── test_memory.py
+│   ├── test_trace.py
+│   ├── test_api.py
+│   ├── test_runtime.py
 │   ├── test_schemas.py
 │   └── test_tool_registry.py
 ├── .env.example
 ├── .gitignore
 └── pyproject.toml
 ~~~
+
+## Chat HTTP API 快速体验
+
+所有业务请求需要演示用身份头 `X-User-ID`。生产环境必须从认证身份获取用户 ID，不应信任客户端自填请求头。
+
+```http
+POST /api/v1/chat
+X-User-ID: demo-user
+Content-Type: application/json
+
+{
+  "message": "请计算 100 * 25",
+  "session_id": null
+}
+```
+
+响应包含 `session_id` 和 `trace_id`。使用 `GET /api/v1/traces/{trace_id}` 查看本次模型调用、工具执行和耗时事件。其他接口与 PowerShell 示例见 [TraceRecorder 与 Chat HTTP API](docs/trace-and-chat-api.md)。
 
 ## 本地运行
 
@@ -220,4 +243,5 @@ asyncio.run(main())
 - [Session 与 MessageStore](docs/sessions.md)
 - [ContextManager](docs/context-manager.md)
 - [Long-term Memory](docs/long-term-memory.md)
+- [TraceRecorder 与 Chat HTTP API](docs/trace-and-chat-api.md)
 - [AI Prompt 与问题解决记录](docs/ai-development-log.md)
