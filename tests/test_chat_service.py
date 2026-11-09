@@ -7,7 +7,7 @@ from min_agent.chat.service import ChatService
 from min_agent.context.manager import ContextManager
 from min_agent.core.schemas import ChatMessage, LLMResponse, ToolCall
 from min_agent.runtime import AgentRuntime
-from min_agent.sessions.store import SessionStore
+from min_agent.sessions.store import SessionNotFoundError, SessionStore
 from min_agent.tools.base import ToolDefinition
 from min_agent.tools.calculator import CalculatorArgs
 from min_agent.tools.registry import ToolRegistry
@@ -80,5 +80,5 @@ async def test_chat_service_rejects_foreign_session(tmp_path) -> None:
     service = ChatService(
         AgentRuntime(FakeProvider([]), ToolRegistry()), store, ContextManager()
     )
-    with pytest.raises(Exception):
+    with pytest.raises(SessionNotFoundError):
         await service.chat("user-b", "Try to read it", session.session_id)
