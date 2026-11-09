@@ -101,8 +101,8 @@ class MemoryStore:
                     """
                     INSERT INTO memories (
                         memory_id, user_id, memory_key, content,
-                        category, source, confidence
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        category, source, confidence, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         memory_id,
@@ -112,6 +112,7 @@ class MemoryStore:
                         candidate.category,
                         "explicit_user_statement",
                         candidate.confidence,
+                        candidate.expires_at,
                     ),
                 )
             else:
@@ -121,13 +122,14 @@ class MemoryStore:
                     UPDATE memories
                     SET content = ?, category = ?, confidence = ?,
                         status = 'active', updated_at = CURRENT_TIMESTAMP,
-                        expires_at = NULL
+                        expires_at = ?
                     WHERE user_id = ? AND memory_key = ?
                     """,
                     (
                         candidate.content,
                         candidate.category,
                         candidate.confidence,
+                        candidate.expires_at,
                         owner,
                         candidate.memory_key,
                     ),
@@ -147,6 +149,7 @@ class MemoryStore:
                 """
                 SELECT * FROM memories
                 WHERE user_id = ? AND status = 'active'
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
                 ORDER BY updated_at DESC, memory_id
                 """,
                 (owner,),
