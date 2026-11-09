@@ -9,9 +9,8 @@ from min_agent.core.schemas import ChatMessage, LLMResponse
 class LLMProvider(Protocol):
     """Minimal contract expected by the custom Agent Runtime.
 
-    Concrete OpenAI-compatible HTTP integration will be added in the LLM
-    integration phase. Keeping this as a protocol makes the Runtime testable
-    with deterministic fake providers.
+    A provider handles model HTTP requests and normalizes responses. It does not
+    execute tools, persist conversation history or control the Agent Loop.
     """
 
     async def complete(

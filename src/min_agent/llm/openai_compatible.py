@@ -42,7 +42,7 @@ class OpenAICompatibleProvider:
         url = f"{self.config.llm_base_url.rstrip('/')}/chat/completions"
         payload: dict[str, Any] = {
             "model": self.config.llm_model,
-            "messages": [message.model_dump(exclude_none=True) for message in messages],
+            "messages": [message.to_openai_dict() for message in messages],
         }
         if tools:
             payload["tools"] = list(tools)
